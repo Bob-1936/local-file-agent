@@ -1,4 +1,4 @@
-# Local File Agent (本地文件智能管理助手 - 2026 Web 工业级增强与三级资产防护版)
+# Local File Agent (本地文件智能管理助手 - 2026 Web)
 
 `Local File Agent (Web Edition)` 是一套基于 **LangGraph 异步图状态机** 与现代化轻量响应式 Web 技术栈构建的工业级本地资产智能体系统。系统深度集成本地关系型数据库（**SQLite3 WAL + FTS5 倒排索引**）、嵌入式向量检索引擎（**LanceDB + Arrow**）以及全生态大语言模型（**DeepSeek / OpenAI / Claude / Gemini / Ollama / 本地兼容端点**）。
 
