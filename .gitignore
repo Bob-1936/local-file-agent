@@ -1,0 +1,23 @@
+# Python 编译缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 运行数据与本地数据库
+data/database/*.db
+data/database/*.db-wal
+data/database/*.db-shm
+data/lancedb/
+data/scan/*.json
+.local_agent_undo_backups/
+
+# 配置文件（避免泄露你的 API Key 和密码）
+config/API_config.json
+config/config.json
+
+# 虚拟环境与 IDE
+venv/
+.venv/
+.idea/
+.vscode/
+*.log

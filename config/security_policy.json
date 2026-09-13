@@ -1,0 +1,122 @@
+{
+  "_comment": "本地文件智能管理助手 - 工具安全策略与权限分级配置文件 (支持冲突换名拦截、安全等级升降级预检与危险操作预检)",
+  "version": "1.3.0",
+  "policies": {
+    "delete_file": {
+      "base_level": "DESTRUCTIVE",
+      "desc": "将资产移入系统回收站（提示：无法自动撤销，需用户在系统回收站手动拾回）",
+      "allow_skip": false
+    },
+    "move_file": {
+      "base_level": "SENSITIVE",
+      "desc": "剪切移动资产（源资产离开原路径，遇同名冲突必须换名或取消）",
+      "allow_skip": true
+    },
+    "copy_file": {
+      "base_level": "SAFE",
+      "desc": "复制文件副本（保留源资产，遇同名冲突必须换名或取消）",
+      "allow_skip": true
+    },
+    "rename_file": {
+      "base_level": "SENSITIVE",
+      "desc": "重命名文件或目录（遇同名冲突前置拦截换名）",
+      "allow_skip": true
+    },
+    "set_security_level": {
+      "base_level": "SENSITIVE",
+      "desc": "调整资产安全等级（升为3级强制验密码；降级产生全员降级警报且原为3级需验密码）",
+      "allow_skip": false
+    },
+    "create_directory": {
+      "base_level": "SAFE",
+      "desc": "在沙箱内新建目录文件夹",
+      "allow_skip": true
+    },
+    "write_file": {
+      "base_level": "SENSITIVE",
+      "desc": "新建或写入文本文件（遇同名冲突必须换名或取消）",
+      "allow_skip": true
+    },
+    "compress_files": {
+      "base_level": "SAFE",
+      "desc": "制作并打包 ZIP 压缩包",
+      "allow_skip": true
+    },
+    "extract_archive": {
+      "base_level": "SENSITIVE",
+      "desc": "解压 ZIP 压缩包（强制 Zip Slip 与压缩炸弹安全预检）",
+      "allow_skip": true
+    },
+    "read_file_content": {
+      "base_level": "SAFE",
+      "desc": "读取沙箱文件内容或列出目录子项",
+      "allow_skip": true
+    },
+    "search_files": {
+      "base_level": "SAFE",
+      "desc": "多路融合 (RRF) 资产检索",
+      "allow_skip": true
+    },
+    "scan_directory": {
+      "base_level": "SAFE",
+      "desc": "磁盘物理扫描与地图构建",
+      "allow_skip": true
+    },
+    "find_duplicate_files": {
+      "base_level": "SAFE",
+      "desc": "基于 SHA-256 哈希排查重复文件",
+      "allow_skip": true
+    },
+    "get_storage_insights": {
+      "base_level": "SAFE",
+      "desc": "获取磁盘存储空间体检报告",
+      "allow_skip": true
+    },
+    "locate_or_open_file": {
+      "base_level": "SAFE",
+      "desc": "调用系统管理器高亮或关联程序打开",
+      "allow_skip": true
+    }
+  },
+  "aliases": {
+    "delete_files": "delete_file",
+    "remove_file": "delete_file",
+    "recycle_file": "delete_file",
+    "move_files": "move_file",
+    "cut_file": "move_file",
+    "cut": "move_file",
+    "copy_files": "copy_file",
+    "copy": "copy_file",
+    "rename": "rename_file",
+    "rename_folder": "rename_file",
+    "rename_directory": "rename_file",
+    "set_level": "set_security_level",
+    "set_security": "set_security_level",
+    "change_security_level": "set_security_level",
+    "update_security_level": "set_security_level",
+    "mkdir": "create_directory",
+    "make_dir": "create_directory",
+    "create_dir": "create_directory",
+    "create_folder": "create_directory",
+    "write_file_content": "write_file",
+    "create_file": "write_file",
+    "save_file": "write_file",
+    "zip": "compress_files",
+    "archive": "compress_files",
+    "make_zip": "compress_files",
+    "unzip": "extract_archive",
+    "extract_zip": "extract_archive",
+    "unpack": "extract_archive"
+  },
+  "tool_exemptions": {
+    "create_directory": true,
+    "compress_files": true,
+    "copy_file": true,
+    "read_file_content": true,
+    "search_files": true,
+    "scan_directory": true,
+    "find_duplicate_files": true,
+    "get_storage_insights": true,
+    "locate_or_open_file": true
+  }
+}

@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<script>
+  // 立即执行：优先读取本地缓存，其次读取系统级外观偏好，杜绝页面闪烁
+  (function() {
+    const savedTheme = localStorage.getItem('app_theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  })();
+</script>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local File Agent (2026 Web Security Edition)</title>
+
+  <script src="/vendor/tailwind.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            dark: {
+              900: '#0b0f17',
+              850: '#0f1523',
+              800: '#111827',
+              750: '#161f30',
+              700: '#1f293d',
+              600: '#374151'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <script src="/vendor/vue.global.prod.js"></script>
+  <script src="/vendor/lucide.min.js"></script>
+  <script src="/vendor/markdown-it.min.js"></script>
+  <link rel="stylesheet" href="/vendor/atom-one-dark.min.css">
+  <script src="/vendor/highlight.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    .prose pre { background-color: #0d1117 !important; border: 1px solid #21262d; border-radius: 0.5rem; padding: 0.75rem; }
+    .prose code {
+  color: #0969da !important;
+  background-color: #f3f4f6;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+    .dark .prose code {
+  color: #58a6ff !important;
+  background-color: rgba(110, 118, 129, 0.2);
+}
+    .prose p { margin-bottom: 0.5rem; line-height: 1.625; }
+    .prose table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+    .prose th, .prose td { border: 1px solid #374151; padding: 0.35rem 0.6rem; font-size: 0.825rem; }
+    .prose th { background-color: #1f293d; color: #f3f4f6; }
+  </style>
+</head>
+
+<body class="bg-gray-100 dark:bg-dark-900 text-gray-800 dark:text-gray-100 font-sans h-screen flex overflow-hidden select-none">
+  <div id="app" class="flex w-full h-full relative" :class="{'dark': isDarkMode}">
+
+    <!-- ==================== 左侧：知识中枢与提示词侧边栏 ==================== -->
+    <aside class="w-80 bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-700 flex flex-col flex-shrink-0 z-10">
+      <div class="p-4 border-b border-gray-200 dark:border-dark-700 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="bot" class="w-6 h-6 text-brand-600 dark:text-brand-500"></i>
+          <span class="font-bold text-sm tracking-wide text-gray-800 dark:text-gray-100">上下文与安全中枢</span>
+        </div>
+        <button @click="refreshConfigs" title="刷新状态" class="p-1.5 hover:bg-gray-200 dark:hover:bg-dark-700 rounded-lg text-gray-500 dark:text-gray-400 transition">
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-3 space-y-4">
+        <!-- 1. 系统提示词卡片 -->
+        <div class="bg-gray-50 dark:bg-dark-750 border border-gray-200 dark:border-dark-700 rounded-xl p-3 hover:border-brand-500/50 transition">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1 text-emerald-500"></i>系统提示词
+            </span>
+            <span class="text-[10px] text-gray-500 dark:text-gray-400 font-mono">~{{ formatTokens(state.system_tokens) }} t</span>
+          </div>
+          <p class="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mb-2 font-mono bg-white dark:bg-dark-900/50 p-1.5 rounded border border-gray-200 dark:border-dark-700">{{ state.system_prompt }}</p>
+          <button @click="openModal('edit_sys_prompt')" class="w-full py-1 text-xs bg-gray-200 dark:bg-dark-700 hover:bg-brand-600 hover:text-white text-gray-700 dark:text-gray-200 rounded-lg transition font-medium">
+            编辑基准指令
+          </button>
+        </div>
+
+        <!-- 2. 常驻资料库 -->
+        <div class="bg-gray-50 dark:bg-dark-750 border border-gray-200 dark:border-dark-700 rounded-xl p-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center">
+              <i data-lucide="database" class="w-3.5 h-3.5 mr-1 text-sky-500"></i>常驻资料库
+            </span>
+            <div class="flex items-center space-x-1.5">
+              <span class="text-[10px] text-gray-400">{{ state.persistent_prompts.length }} 项</span>
+              <button @click="rescanPersistentPrompts" :disabled="isRescanningPersistent" title="重新扫描磁盘文件" class="p-1 hover:bg-gray-200 dark:hover:bg-dark-600 rounded text-gray-400">
+                <i data-lucide="refresh-cw" class="w-3 h-3" :class="{'animate-spin': isRescanningPersistent}"></i>
+              </button>
+            </div>
+          </div>
+          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+            <div v-for="item in state.persistent_prompts" :key="item.id" class="flex items-center justify-between text-xs p-1.5 hover:bg-gray-200/60 dark:hover:bg-dark-700/60 rounded">
+              <div class="flex items-center space-x-2 truncate flex-1 mr-2">
+                <input type="checkbox" :checked="item.enabled" @change="togglePersistent(item.id, !item.enabled)" class="rounded bg-white dark:bg-dark-900 border-gray-300 dark:border-dark-600 text-brand-600 focus:ring-0">
+                <span class="truncate text-gray-700 dark:text-gray-300" :title="item.rel_path">{{ item.rel_path }}</span>
+              </div>
+              <span class="text-[10px] text-gray-400 font-mono flex-shrink-0">~{{ formatTokens(item.tokens) }} t</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 临时提示词 -->
+        <div class="bg-gray-50 dark:bg-dark-750 border border-gray-200 dark:border-dark-700 rounded-xl p-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center">
+              <i data-lucide="layers" class="w-3.5 h-3.5 mr-1 text-amber-500"></i>临时资料与指令
+            </span>
+            <button @click="openModal('add_temp_prompt')" class="text-xs text-brand-600 dark:text-brand-500 hover:underline">+ 新增</button>
+          </div>
+          <div v-if="state.temp_prompts.length === 0" class="text-xs text-gray-400 py-3 text-center">暂无临时挂载数据</div>
+          <div v-else class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            <div v-for="(t, idx) in state.temp_prompts" :key="t.id" class="flex items-center justify-between text-xs p-1.5 bg-white dark:bg-dark-900/40 rounded border border-gray-200 dark:border-dark-700">
+              <div class="flex items-center space-x-1 truncate flex-1 mr-1">
+                <span class="text-[10px] text-gray-400 font-mono w-4">{{ idx + 1 }}.</span>
+                <span class="truncate text-gray-800 dark:text-gray-200" :title="t.title">{{ t.title }}</span>
+                <span class="text-[10px] text-gray-400 font-mono">~{{ formatTokens(t.tokens) }} t</span>
+              </div>
+              <div class="flex items-center space-x-1 flex-shrink-0">
+                <button @click="moveTempPrompt(idx, -1)" :disabled="idx === 0" class="text-gray-400 hover:text-gray-200 disabled:opacity-30 p-0.5" title="上移">▲</button>
+                <button @click="moveTempPrompt(idx, 1)" :disabled="idx === state.temp_prompts.length - 1" class="text-gray-400 hover:text-gray-200 disabled:opacity-30 p-0.5" title="下移">▼</button>
+                <button @click="openEditTempPrompt(t)" class="text-gray-400 hover:text-brand-400 p-0.5" title="编辑"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+                <button @click="deleteTempPrompt(t.id)" class="text-gray-400 hover:text-rose-400 p-0.5" title="删除"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. 底部细粒度 Token 统计看板 -->
+      <div class="p-3 border-t border-gray-200 dark:border-dark-700 bg-gray-50 dark:bg-dark-800/80 text-xs space-y-1.5">
+        <div class="flex justify-between text-gray-500 dark:text-gray-400">
+          <span>工作区沙箱:</span>
+          <span class="text-gray-700 dark:text-gray-200 font-mono truncate max-w-[140px]" :title="state.app_config.target_path">{{ state.app_config.target_path || '未指定' }}</span>
+        </div>
+        <div class="flex justify-between text-gray-500 dark:text-gray-400">
+          <span>会话历史记录:</span>
+          <span class="font-mono text-gray-700 dark:text-gray-300">{{ state.history_count }} 条 (~{{ formatTokens(state.history_tokens) }} t)</span>
+        </div>
+        <div class="flex justify-between text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-dark-700 pt-1.5">
+          <span class="font-semibold text-gray-700 dark:text-gray-300">上下文总预估:</span>
+          <span class="text-emerald-600 dark:text-emerald-400 font-mono font-bold">~{{ formatTokens(state.total_tokens) }} Tokens</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ==================== 右侧工作区 ==================== -->
+    <main class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-dark-900 overflow-hidden relative">
+      <!-- 顶栏控制台 -->
+      <header class="h-14 border-b border-gray-200 dark:border-dark-700 bg-white/70 dark:bg-dark-800/60 backdrop-blur-md px-6 flex items-center justify-between z-10">
+        <div class="flex items-center space-x-3">
+          <span class="text-xs font-semibold text-gray-500 dark:text-gray-400">Profile:</span>
+          <select v-model="state.current_api_profile" @change="switchProfile" class="bg-gray-100 dark:bg-dark-700 border border-gray-300 dark:border-dark-600 rounded-lg px-2.5 py-1 text-xs text-gray-800 dark:text-gray-200 outline-none">
+            <option v-for="(val, key) in state.api_profiles" :key="key" :value="key">{{ key }}</option>
+          </select>
+          <div class="px-2.5 py-1 bg-gray-100 dark:bg-dark-700/80 border border-gray-300 dark:border-dark-600 rounded-lg text-xs font-mono text-brand-600 dark:text-brand-500 flex items-center">
+            <i data-lucide="cpu" class="w-3.5 h-3.5 mr-1.5"></i>
+            {{ state.current_model_tag || '未连接 API' }}
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <!-- 🛡️ 资产安全等级管理入口 -->
+          <button @click="openSecurityLevelsModal" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 rounded-lg text-xs font-semibold flex items-center transition shadow-sm">
+            <i data-lucide="shield" class="w-3.5 h-3.5 mr-1 text-indigo-500"></i>🛡️ 资产安全等级
+          </button>
+
+          <!-- ↩ 撤销上一步操作按钮 -->
+          <button @click="triggerUndo"
+                  :disabled="!canUndo || isUndoing || isStreaming"
+                  :class="canUndo ? 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700/80 shadow-sm cursor-pointer' : 'bg-gray-200 dark:bg-dark-800 text-gray-400 dark:text-gray-600 border-gray-300 dark:border-dark-700 cursor-not-allowed opacity-50'"
+                  class="px-3 py-1.5 border rounded-lg text-xs font-semibold flex items-center transition"
+                  title="原子撤销上一步可逆操作（无记录时自动置灰禁用）">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 mr-1" :class="{'animate-spin': isUndoing}"></i>
+            {{ isUndoing ? '撤销中...' : '↩ 撤销上一步' }}
+          </button>
+
+          <!-- 📋 审计日志入口 -->
+          <button @click="openModal('audit_log')" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="clipboard-list" class="w-3.5 h-3.5 mr-1 text-sky-500"></i>📋 审计日志
+          </button>
+
+          <button @click="toggleTheme" class="px-2.5 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
+            <span>{{ isDarkMode ? '☀️ 白天' : '🌙 黑夜' }}</span>
+          </button>
+          <button @click="openModal('api')" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="key" class="w-3.5 h-3.5 mr-1 text-amber-500"></i>API
+          </button>
+          <button @click="openModal('scan_config')" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="folder-cog" class="w-3.5 h-3.5 mr-1 text-emerald-500"></i>配置
+          </button>
+          <button @click="openModal('fast_chat')" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="zap" class="w-3.5 h-3.5 mr-1 text-yellow-500"></i>快捷
+          </button>
+          <button @click="triggerSyncDb" :disabled="isSyncingDb" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5 mr-1" :class="{'animate-spin': isSyncingDb}"></i>
+            {{ isSyncingDb ? '同步中...' : '同步索引' }}
+          </button>
+          <button @click="clearMessages" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-300 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i>清空
+          </button>
+        </div>
+      </header>
+
+      <!-- 对话列表展示区 -->
+      <div ref="chatContainer" class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+        <div v-for="(msg, idx) in messages" :key="idx" class="flex flex-col space-y-2">
+          <!-- 用户消息 -->
+          <div v-if="msg.role === 'user'" class="flex items-start justify-end space-x-3">
+            <div class="max-w-2xl bg-brand-600 text-white p-3.5 rounded-2xl rounded-tr-sm shadow text-sm leading-relaxed whitespace-pre-wrap select-text">
+              <img v-if="msg.image" :src="msg.image" class="max-w-xs max-h-48 rounded-lg mb-2 object-cover border border-white/20">
+              {{ msg.content }}
+            </div>
+            <div class="w-8 h-8 rounded-full bg-brand-700 flex items-center justify-center flex-shrink-0 text-white shadow">
+              <i data-lucide="user" class="w-4 h-4"></i>
+            </div>
+          </div>
+
+          <!-- 智能体消息 -->
+          <div v-else class="flex items-start space-x-3">
+            <div class="w-8 h-8 rounded-full bg-white dark:bg-dark-700 border border-gray-200 dark:border-dark-600 flex items-center justify-center flex-shrink-0 text-brand-600 dark:text-brand-500 mt-1 shadow-sm">
+              <i data-lucide="bot" class="w-4 h-4"></i>
+            </div>
+            <div class="flex-1 max-w-3xl space-y-3">
+              <!-- 推理思考链折叠卡片 -->
+              <div v-if="msg.thought" class="border border-gray-200 dark:border-dark-700 bg-white dark:bg-dark-800/40 rounded-xl overflow-hidden text-xs shadow-sm">
+                <button @click="msg.thinkExpanded = !msg.thinkExpanded" class="w-full px-3 py-2 bg-gray-100 dark:bg-dark-750/50 hover:bg-gray-200 dark:hover:bg-dark-700 flex items-center justify-between text-gray-600 dark:text-gray-400 transition">
+                  <div class="flex items-center space-x-1.5">
+                    <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500" :class="{'animate-pulse': isStreaming && idx === messages.length - 1}"></i>
+                    <span>深度推演过程 ({{ msg.thought.length }} 字符)</span>
+                  </div>
+                  <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform duration-200" :class="{'rotate-180': msg.thinkExpanded}"></i>
+                </button>
+                <div v-show="msg.thinkExpanded" class="p-3 font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-900/60 whitespace-pre-wrap leading-relaxed border-t border-gray-200 dark:border-dark-700 select-text">
+                  {{ msg.thought }}
+                </div>
+              </div>
+
+              <!-- 工具调用卡片 -->
+              <div v-for="(tool, tIdx) in msg.tool_calls" :key="tIdx" class="border border-gray-200 dark:border-dark-700 bg-white dark:bg-dark-800/80 rounded-xl p-3 text-xs space-y-2 shadow-sm">
+                <div class="flex items-center justify-between text-gray-700 dark:text-gray-300 font-mono">
+                  <span class="flex items-center text-brand-600 dark:text-brand-400 font-bold">
+                    <i data-lucide="wrench" class="w-3.5 h-3.5 mr-1.5"></i>{{ tool.name }}
+                  </span>
+                  <span v-if="tool.status === 'running'" class="text-amber-500 flex items-center">
+                    <i data-lucide="loader-2" class="w-3 h-3 mr-1 animate-spin"></i>调度执行中
+                  </span>
+                  <span v-else-if="tool.status === 'aborted'" class="text-gray-400 flex items-center">
+                    <i data-lucide="slash" class="w-3 h-3 mr-1"></i>已废弃/中止
+                  </span>
+                  <span v-else-if="tool.status === 'error'" class="text-rose-500 flex items-center">
+                    <i data-lucide="alert-circle" class="w-3 h-3 mr-1"></i>异常或拦截
+                  </span>
+                  <span v-else class="text-emerald-500 flex items-center">
+                    <i data-lucide="check" class="w-3 h-3 mr-1"></i>执行完成
+                  </span>
+                </div>
+                <pre class="bg-gray-100 dark:bg-dark-900/90 text-gray-700 dark:text-gray-300 p-2 rounded text-[11px] overflow-x-auto select-text">{{ JSON.stringify(tool.args, null, 2) }}</pre>
+
+                <div v-if="tool.result" class="border-t border-gray-200 dark:border-dark-700/60 pt-2">
+                  <button @click="tool.isExpanded = !tool.isExpanded" class="text-[11px] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center mb-1">
+                    <i data-lucide="chevron-right" class="w-3 h-3 mr-1 transition-transform" :class="{'rotate-90': tool.isExpanded}"></i>
+                    <span>{{ tool.isExpanded ? '收起详情' : '展开详情' }} ({{ tool.result.length }} 字符)</span>
+                  </button>
+                  <div v-show="tool.isExpanded || tool.result.length < 300" class="prose max-w-none text-gray-800 dark:text-gray-200 text-xs select-text max-h-60 overflow-y-auto" v-html="renderMarkdown(tool.result)"></div>
+                </div>
+              </div>
+
+              <!-- 正文消息 -->
+              <div v-if="msg.content" class="prose max-w-none text-gray-800 dark:text-gray-200 text-sm leading-relaxed select-text" v-html="renderMarkdown(msg.content)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部输入与操作区 -->
+      <footer class="p-4 bg-white dark:bg-dark-900 border-t border-gray-200 dark:border-dark-700 flex flex-col space-y-2.5">
+        <div class="flex items-center space-x-2 overflow-x-auto pb-1">
+          <span class="text-xs text-gray-400 flex-shrink-0 flex items-center"><i data-lucide="zap" class="w-3 h-3 mr-1"></i>快捷:</span>
+          <button v-for="chip in state.fast_chats"
+                  :key="chip.title || chip"
+                  :disabled="isStreaming || isUndoing"
+                  @click="triggerFastChat(chip)"
+                  class="px-2.5 py-1 bg-gray-100 dark:bg-dark-800 hover:bg-gray-200 dark:hover:bg-dark-700 border border-gray-300 dark:border-dark-700 text-xs rounded-full text-gray-700 dark:text-gray-300 whitespace-nowrap transition disabled:opacity-40">
+            {{ chip.title || chip }}
+          </button>
+        </div>
+
+        <div v-if="attachedFile" class="flex items-center justify-between bg-gray-100 dark:bg-dark-800 border border-brand-500/40 px-3 py-1.5 rounded-lg text-xs">
+          <div class="flex items-center space-x-2 truncate">
+            <i :data-lucide="attachedFile.is_image ? 'image' : 'file-text'" class="w-4 h-4 text-brand-600 dark:text-brand-500 flex-shrink-0"></i>
+            <span class="text-gray-800 dark:text-gray-200 truncate font-mono">{{ attachedFile.filename }}</span>
+          </div>
+          <button @click="attachedFile = null" class="text-gray-400 hover:text-rose-400 p-0.5"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+        </div>
+
+        <div class="bg-gray-50 dark:bg-dark-800 border border-gray-300 dark:border-dark-700 focus-within:border-brand-500/70 rounded-xl p-2.5 flex items-end space-x-2 transition shadow-sm"
+             :class="{'opacity-60 cursor-not-allowed': isUndoing}">
+          <label class="p-2 hover:bg-gray-200 dark:hover:bg-dark-700 rounded-lg text-gray-500 dark:text-gray-400 transition flex-shrink-0 cursor-pointer"
+                 :class="{'pointer-events-none opacity-40': isUndoing || isStreaming}" title="上传附件">
+            <i data-lucide="paperclip" class="w-4 h-4"></i>
+            <input type="file" @change="handleFileUpload" :disabled="isUndoing || isStreaming" class="hidden">
+          </label>
+
+          <textarea ref="messageInputRef"
+                    v-model="inputMessage"
+                    :disabled="isUndoing"
+                    @keydown.enter.exact.prevent="sendMessage"
+                    :placeholder="isUndoing ? '⏳ 正在执行撤销事务，通道已互斥锁定，请稍候...' : '提问文件、指示 Agent 打包、解压、新建目录或管理资产...'"
+                    rows="2"
+                    class="flex-1 bg-transparent border-0 focus:ring-0 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 resize-none max-h-32 outline-none disabled:cursor-not-allowed"></textarea>
+
+          <div class="flex items-center space-x-2">
+            <button v-if="isStreaming" @click="abortCurrentStream" class="p-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition" title="强制中止">
+              <i data-lucide="square" class="w-4 h-4"></i>
+            </button>
+            <button v-else @click="sendMessage" :disabled="(!inputMessage.trim() && !attachedFile) || isUndoing" class="p-2 bg-brand-600 hover:bg-brand-500 disabled:bg-gray-300 dark:disabled:bg-dark-700 disabled:text-gray-400 text-white rounded-lg transition">
+              <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <!-- ==================== 模态弹窗系统 ==================== -->
+
+    <!-- 0. 🛡️ 资产安全等级管理全屏面板 (修复 Bug 2：防止汉字折行与表格挤压) -->
+    <div v-if="modals.security_levels" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-5xl w-full p-6 shadow-2xl flex flex-col max-h-[90vh] text-gray-800 dark:text-gray-100 space-y-4">
+        <!-- 头部 -->
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <div class="flex items-center space-x-2">
+            <div class="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
+              <i data-lucide="shield" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-base flex items-center">
+                资产安全等级管理器
+                <span class="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400 font-mono">(灾备名单自动保存至 data/)</span>
+              </h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                规则说明：所有文件默认为 1 级；文件夹设为 2/3 级后内部所有文件自动动态继承，且下属已有单独标记全部自动恢复为 1 级。
+              </p>
+            </div>
+          </div>
+          <button @click="closeModal('security_levels')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+
+        <!-- 目录面包屑导航与路径跳转 -->
+        <div class="flex items-center justify-between bg-gray-50 dark:bg-dark-750 p-2.5 rounded-xl border border-gray-200 dark:border-dark-700 text-xs">
+          <div class="flex items-center space-x-1.5 truncate">
+            <span class="text-gray-400">当前位置:</span>
+            <button @click="loadAssetBrowseDir('')" class="text-brand-600 dark:text-brand-400 hover:underline font-bold font-mono">/ (工作区根目录)</button>
+            <template v-if="currentBrowseDir">
+              <span class="text-gray-400">/</span>
+              <span class="font-mono text-gray-700 dark:text-gray-200">{{ currentBrowseDir }}</span>
+            </template>
+          </div>
+          <button v-if="currentBrowseDir" @click="navigateParentAssetDir" class="px-2 py-1 bg-gray-200 dark:bg-dark-600 hover:bg-gray-300 rounded text-xs flex items-center">
+            <i data-lucide="corner-left-up" class="w-3.5 h-3.5 mr-1"></i>返回上一级
+          </button>
+        </div>
+
+        <!-- 批量操作控制工具条 (全选/反选/设为1/2/3级) -->
+        <div class="flex items-center justify-between bg-gray-100 dark:bg-dark-900/60 p-3 rounded-xl border border-gray-200 dark:border-dark-700">
+          <div class="flex items-center space-x-2">
+            <button @click="selectAllAssets" class="px-2.5 py-1.5 bg-white dark:bg-dark-700 border border-gray-300 dark:border-dark-600 rounded-lg text-xs font-medium hover:bg-gray-50">
+              全选当前页
+            </button>
+            <button @click="invertSelectAssets" class="px-2.5 py-1.5 bg-white dark:bg-dark-700 border border-gray-300 dark:border-dark-600 rounded-lg text-xs font-medium hover:bg-gray-50">
+              反选
+            </button>
+            <button @click="clearAssetSelection" class="px-2.5 py-1.5 bg-white dark:bg-dark-700 border border-gray-300 dark:border-dark-600 rounded-lg text-xs font-medium hover:bg-gray-50 text-gray-500">
+              取消选择
+            </button>
+            <span class="text-xs text-gray-500 ml-2">已勾选 <b class="text-brand-600 dark:text-brand-400">{{ selectedAssetPaths.size }}</b> 项资产</span>
+          </div>
+
+          <!-- 等级切换按钮组 -->
+          <div class="flex items-center space-x-2">
+            <span class="text-xs text-gray-400">批量设置等级:</span>
+            <button @click="applyBatchSecurityLevel(1)"
+                    :disabled="selectedAssetPaths.size === 0 || isUpdatingSecurityLevels"
+                    class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-300 rounded-lg text-xs font-medium disabled:opacity-40 flex items-center">
+              🟢 设为 1 级 (普通)
+            </button>
+            <button @click="applyBatchSecurityLevel(2)"
+                    :disabled="selectedAssetPaths.size === 0 || isUpdatingSecurityLevels"
+                    class="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80 rounded-lg text-xs font-semibold disabled:opacity-40 flex items-center">
+              🟡 设为 2 级 (操作提醒)
+            </button>
+            <button @click="applyBatchSecurityLevel(3)"
+                    :disabled="selectedAssetPaths.size === 0 || isUpdatingSecurityLevels"
+                    class="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700/80 rounded-lg text-xs font-semibold disabled:opacity-40 flex items-center">
+              🔴 设为 3 级 (受密码保护)
+            </button>
+          </div>
+        </div>
+
+        <!-- 资产表格清单 (加固最小宽度与防折行) -->
+        <div class="flex-1 overflow-auto border border-gray-200 dark:border-dark-700 rounded-xl">
+          <table class="w-full text-left text-xs min-w-[760px]">
+            <thead class="bg-gray-100 dark:bg-dark-750 text-gray-600 dark:text-gray-300 sticky top-0 font-mono">
+              <tr>
+                <th class="p-3 w-10 text-center whitespace-nowrap">
+                  <input type="checkbox" :checked="isAllCurrentSelected" @change="toggleSelectAllCurrent" class="rounded bg-white dark:bg-dark-900 border-gray-300 dark:border-dark-600 text-brand-600">
+                </th>
+                <th class="p-3 whitespace-nowrap min-w-[180px]">资产名称 / 类型</th>
+                <th class="p-3 whitespace-nowrap min-w-[110px]">生效安全等级</th>
+                <th class="p-3 whitespace-nowrap min-w-[130px]">标记来源</th>
+                <th class="p-3 whitespace-nowrap min-w-[70px]">大小</th>
+                <th class="p-3 whitespace-nowrap min-w-[160px]">相对路径</th>
+                <th class="p-3 text-right whitespace-nowrap min-w-[110px]">快捷设置</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
+              <tr v-for="item in securityAssetsList" :key="item.rel_path" class="hover:bg-gray-50 dark:hover:bg-dark-700/40 transition">
+                <td class="p-3 text-center whitespace-nowrap">
+                  <input type="checkbox" :checked="selectedAssetPaths.has(item.rel_path)" @change="toggleAssetSelection(item)" class="rounded bg-white dark:bg-dark-900 border-gray-300 dark:border-dark-600 text-brand-600">
+                </td>
+                <td class="p-3 font-medium">
+                  <div class="flex items-center space-x-2">
+                    <i :data-lucide="item.is_dir ? 'folder' : 'file-text'" class="w-4 h-4 flex-shrink-0" :class="item.is_dir ? 'text-amber-500' : 'text-gray-400'"></i>
+                    <button v-if="item.is_dir" @click="loadAssetBrowseDir(item.rel_path)" class="text-brand-600 dark:text-brand-400 hover:underline font-semibold font-mono truncate max-w-xs text-left">
+                      {{ item.name }}
+                    </button>
+                    <span v-else class="truncate max-w-xs font-mono text-gray-800 dark:text-gray-200">{{ item.name }}</span>
+                  </div>
+                </td>
+                <td class="p-3 whitespace-nowrap">
+                  <span v-if="item.effective_level === 3" class="px-2 py-0.5 bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded font-semibold text-[11px] inline-flex items-center whitespace-nowrap">
+                    <i data-lucide="lock" class="w-3 h-3 mr-1"></i>3级 机密
+                  </span>
+                  <span v-else-if="item.effective_level === 2" class="px-2 py-0.5 bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded font-semibold text-[11px] inline-flex items-center whitespace-nowrap">
+                    <i data-lucide="alert-triangle" class="w-3 h-3 mr-1"></i>2级 敏感
+                  </span>
+                  <span v-else class="px-2 py-0.5 bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-dark-600 rounded text-[11px] inline-flex items-center whitespace-nowrap">
+                    🟢 1级 普通
+                  </span>
+                </td>
+                <td class="p-3 text-[11px] whitespace-nowrap">
+                  <span v-if="item.is_inherited" class="text-indigo-500 font-medium inline-block whitespace-nowrap">↳ 继承自父目录</span>
+                  <span v-else-if="item.explicit_level > 1" class="text-emerald-500 font-medium inline-block whitespace-nowrap">★ 本资产显式指定</span>
+                  <span v-else class="text-gray-400 inline-block whitespace-nowrap">默认继承</span>
+                </td>
+                <td class="p-3 font-mono text-gray-500 whitespace-nowrap">{{ item.size_str }}</td>
+                <td class="p-3 font-mono text-gray-400 truncate max-w-xs" :title="item.rel_path">{{ item.rel_path }}</td>
+                <td class="p-3 text-right whitespace-nowrap">
+                  <select :value="item.explicit_level" @change="onSingleAssetLevelChange(item, $event)" class="bg-gray-100 dark:bg-dark-700 border border-gray-300 dark:border-dark-600 rounded px-2 py-1 text-xs outline-none">
+                    <option :value="1">设为 1级</option>
+                    <option :value="2">设为 2级</option>
+                    <option :value="3">设为 3级</option>
+                  </select>
+                </td>
+              </tr>
+              <tr v-if="securityAssetsList.length === 0">
+                <td colspan="7" class="p-8 text-center text-gray-400 font-sans">
+                  {{ isLoadingAssets ? '正在加载当前目录资产...' : '当前目录下没有文件或子目录' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 底部 -->
+        <div class="flex justify-between items-center pt-2">
+          <div class="text-xs text-gray-500 flex items-center">
+            <i data-lucide="info" class="w-3.5 h-3.5 mr-1 text-sky-500"></i>
+            数据自动与 <code class="font-mono text-gray-700 dark:text-gray-300">data/asset_security_levels.json</code> 灾备同步，若数据库清空将自动重灌恢复。
+          </div>
+          <button @click="closeModal('security_levels')" class="px-5 py-2 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 rounded-lg text-xs font-semibold">
+            完成并关闭
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1. HITL 挂起拦截模态框 (包含降级警报、同名冲突换名与 3 级高危密码核验) -->
+    <div v-if="hitlModal.visible" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-xl w-full p-6 border border-gray-200 dark:border-gray-700">
+
+        <!-- 头部图标与标题 -->
+        <div class="flex items-start gap-4 mb-4">
+          <div class="p-3 rounded-full" :class="hitlModal.max_asset_level === 3 || hitlModal.level === 'DESTRUCTIVE' ? 'bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'">
+            <i :data-lucide="hitlModal.max_asset_level === 3 ? 'lock' : 'alert-triangle'" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center">
+              <span v-if="hitlModal.is_downgrade" class="text-rose-600 dark:text-rose-400 mr-1.5">⚠️ 全员安全降级警报</span>
+              <span v-else-if="hitlModal.is_conflict" class="text-amber-600 dark:text-amber-400 mr-1.5">⚠️ 目标资产命名冲突</span>
+              <span v-else-if="hitlModal.max_asset_level === 3" class="text-rose-600 dark:text-rose-400 mr-1.5">🔒 3 级机密资产受控操作</span>
+              <span v-else>安全操作确认</span>
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">{{ hitlModal.reason }}</p>
+          </div>
+        </div>
+
+        <!-- 降级特别警告提示框 -->
+        <div v-if="hitlModal.is_downgrade" class="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-lg text-xs text-rose-800 dark:text-rose-300 leading-relaxed font-semibold">
+          🚨 【注意】：将资产移入低安全级别目录后，该资产及其所有内部文件的保护级别将彻底降级！若该操作被批准，移出后所有文件都将以新目录的低安全级别运行。
+        </div>
+
+        <!-- 冲突处理指引与选项 -->
+        <div v-if="hitlModal.is_conflict" class="mb-4 space-y-3">
+          <div class="p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+              ✨ 安全选项：指定新名称以避免覆盖（无需密码）：
+            </label>
+            <input
+              type="text"
+              v-model="hitlModal.new_name"
+              placeholder="例如: backup_new.txt"
+              class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <!-- 涉及资产清单预览 (携带安全等级徽章) -->
+        <div class="mb-4 bg-gray-50 dark:bg-gray-900/60 p-3 rounded-lg border border-gray-200 dark:border-gray-700 max-h-40 overflow-y-auto">
+          <div class="text-xs font-semibold text-gray-500 mb-1.5">涉及资产清单 ({{ hitlAssetAnalysis.items.length }} 项):</div>
+          <div v-for="(item, idx) in hitlAssetAnalysis.items" :key="idx" class="text-xs py-1.5 px-2 flex items-center justify-between text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800 last:border-0">
+            <div class="flex items-center gap-2 truncate flex-1 mr-2">
+              <i :data-lucide="item.is_dir ? 'folder' : 'file-text'" class="w-3.5 h-3.5 text-gray-400"></i>
+              <span class="truncate font-mono">{{ item.name }}</span>
+            </div>
+            <span v-if="item.security_level === 3" class="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950 text-rose-600 border border-rose-300 dark:border-rose-800 rounded text-[10px] font-bold">
+              3级机密
+            </span>
+            <span v-else-if="item.security_level === 2" class="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-600 border border-amber-300 dark:border-amber-800 rounded text-[10px] font-bold">
+              2级敏感
+            </span>
+            <span v-else class="text-[10px] text-gray-400">
+              1级普通
+            </span>
+          </div>
+        </div>
+
+        <!-- 密码输入框：凡破坏性操作、选择覆盖已有资产、或涉及 3 级高危机密资产时必须展示 -->
+        <div v-if="(hitlModal.level === 'DESTRUCTIVE' || hitlModal.is_conflict || hitlModal.max_asset_level === 3)" class="mb-4 p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg">
+          <div v-if="!state.has_password" class="space-y-2">
+            <div class="text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center">
+              <i data-lucide="alert-circle" class="w-4 h-4 mr-1"></i>
+              系统尚未初始化主管理密码，无法对 3 级资产或危险操作进行安全授权！
+            </div>
+            <button @click="openPasswordModal(true)" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-medium">
+              🔐 立即设置主管理密码
+            </button>
+          </div>
+          <div v-else>
+            <label class="block text-xs font-semibold text-rose-700 dark:text-rose-400 mb-1">
+              🔒 高危机密鉴权：执行该操作必须验证主管理密码：
+            </label>
+            <input
+              type="password"
+              v-model="hitlModal.password"
+              placeholder="请输入主管理密码以完成高危授权"
+              class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-rose-300 dark:border-rose-700 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+            />
+          </div>
+        </div>
+
+        <!-- 底部按钮操作区 -->
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <button
+            @click="resolveHITL(false)"
+            class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
+          >
+            <i data-lucide="x-circle" class="w-4 h-4 text-red-500"></i>
+            取消操作
+          </button>
+
+          <!-- 安全选项：更换名称（免密） -->
+          <button
+            v-if="hitlModal.is_conflict && hitlModal.new_name.trim()"
+            @click="resolveHITL(true, 'rename')"
+            class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+          >
+            <i data-lucide="edit-3" class="w-4 h-4"></i>
+            更名并继续 (免密)
+          </button>
+
+          <!-- 危险选项：覆盖原有文件（需密码） -->
+          <button
+            v-if="hitlModal.is_conflict"
+            @click="resolveHITL(true, 'overwrite')"
+            class="px-4 py-2 text-sm bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+          >
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+            确认覆盖原有文件 (危险)
+          </button>
+
+          <!-- 常规确认执行 (如果是降级则显示降级确认文本) -->
+          <button
+            v-if="!hitlModal.is_conflict"
+            @click="resolveHITL(true)"
+            :class="hitlModal.max_asset_level === 3 || hitlModal.is_downgrade ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'"
+            class="px-4 py-2 text-sm text-white font-medium rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+          >
+            <i data-lucide="check-circle" class="w-4 h-4"></i>
+            {{ hitlModal.is_downgrade ? '确认降级并继续执行' : '确认执行' }}
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 2. 操作审计日志模态框 -->
+    <div v-if="modals.audit_log" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <h3 class="font-bold text-sm flex items-center">
+            <i data-lucide="clipboard-list" class="w-4 h-4 mr-2 text-sky-500"></i>操作审计日志（记录谁在何时对哪些资产做了什么）
+          </h3>
+          <button @click="closeModal('audit_log')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+
+        <div class="flex-1 overflow-auto border border-gray-200 dark:border-dark-700 rounded-xl">
+          <table class="w-full text-left text-xs font-mono">
+            <thead class="bg-gray-100 dark:bg-dark-750 text-gray-600 dark:text-gray-300 sticky top-0">
+              <tr>
+                <th class="p-2.5">时间</th>
+                <th class="p-2.5">操作人</th>
+                <th class="p-2.5">动作</th>
+                <th class="p-2.5">等级</th>
+                <th class="p-2.5">状态</th>
+                <th class="p-2.5">涉及资产</th>
+                <th class="p-2.5">详情记录</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
+              <tr v-for="log in auditLogs" :key="log.id" class="hover:bg-gray-50 dark:hover:bg-dark-700/50">
+                <td class="p-2.5 text-gray-500 whitespace-nowrap">{{ log.formatted_time }}</td>
+                <td class="p-2.5 whitespace-nowrap">{{ log.operator }}</td>
+                <td class="p-2.5 font-bold text-brand-500 whitespace-nowrap">{{ log.action_name }}</td>
+                <td class="p-2.5 whitespace-nowrap">
+                  <span :class="log.level === 'DESTRUCTIVE' ? 'text-rose-500' : (log.level === 'SENSITIVE' ? 'text-amber-500' : 'text-emerald-500')">{{ log.level }}</span>
+                </td>
+                <td class="p-2.5 whitespace-nowrap">
+                  <span :class="log.status === 'SUCCESS' ? 'text-emerald-500' : 'text-rose-500'">{{ log.status }}</span>
+                </td>
+                <td class="p-2.5 max-w-xs truncate" :title="log.target_paths">{{ log.target_paths }}</td>
+                <td class="p-2.5 max-w-sm truncate" :title="log.details">{{ log.details }}</td>
+              </tr>
+              <tr v-if="auditLogs.length === 0">
+                <td colspan="7" class="p-6 text-center text-gray-400 font-sans">暂无审计日志记录</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex justify-between items-center pt-2">
+          <button @click="fetchAuditLogs" class="text-xs text-brand-600 dark:text-brand-400 hover:underline flex items-center">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5 mr-1"></i>刷新日志列表
+          </button>
+          <button @click="closeModal('audit_log')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs font-medium">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. API 接口与模型配置模态框 -->
+    <div v-if="modals.api" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+  <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+    <!-- 弹窗顶栏 -->
+    <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+      <h3 class="font-bold text-sm flex items-center">
+        <i data-lucide="key" class="w-4 h-4 mr-2 text-amber-500"></i>API 接口与模型配置
+      </h3>
+      <button @click="closeModal('api')" class="text-gray-400 hover:text-gray-200">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- 顶部：切换正在编辑的配置或新建 -->
+    <div class="flex items-center justify-between bg-gray-50 dark:bg-dark-750 p-2.5 rounded-xl border border-gray-200 dark:border-dark-700 text-xs">
+      <span class="text-gray-500 dark:text-gray-400 flex items-center">
+        <i data-lucide="sliders" class="w-3.5 h-3.5 mr-1 text-brand-500"></i>载入配置:
+      </span>
+      <div class="flex items-center space-x-2">
+        <select :value="state.api_profiles[formApi.name] ? formApi.name : ''"
+                @change="selectProfileToEdit($event.target.value)"
+                class="bg-white dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-2.5 py-1 text-xs outline-none">
+          <option value="" disabled>-- 选择已有配置 --</option>
+          <option v-for="(v, k) in state.api_profiles" :key="k" :value="k">{{ k }}</option>
+        </select>
+        <button @click="selectProfileToEdit('')" class="px-2 py-1 bg-brand-50 hover:bg-brand-100 dark:bg-brand-950/60 dark:hover:bg-brand-900/60 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800 rounded-lg font-medium">
+          + 新建
+        </button>
+      </div>
+    </div>
+
+    <!-- 表单正文 -->
+    <div class="space-y-3 text-xs">
+      <div>
+        <label class="block text-gray-500 dark:text-gray-400 mb-1">模型厂商协议 (自动填充推荐端点):</label>
+        <select v-model="formApi.platform" @change="onPlatformChange" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+          <option v-for="(v, k) in platformPresets" :key="k" :value="k">{{ k }}</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-gray-500 dark:text-gray-400 mb-1">配置标识名称 (唯一主键):</label>
+        <input v-model="formApi.name" type="text" placeholder="例如: 我的_DeepSeek" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+      </div>
+      <div>
+        <label class="block text-gray-500 dark:text-gray-400 mb-1">端点 URL:</label>
+        <input v-model="formApi.url" type="text" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+      </div>
+      <div>
+        <label class="block text-gray-500 dark:text-gray-400 mb-1">API Key (已有配置留空表示不修改):</label>
+        <input v-model="formApi.key" type="password" placeholder="sk-..." class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <label class="text-gray-500 dark:text-gray-400">选择或输入模型名称:</label>
+          <button @click="fetchOnlineModels" :disabled="isFetchingModels" class="text-brand-600 dark:text-brand-400 hover:underline flex items-center">
+            <i data-lucide="refresh-cw" class="w-3 h-3 mr-1" :class="{'animate-spin': isFetchingModels}"></i>
+            {{ isFetchingModels ? '拉取中...' : '🔄 拉取可用模型' }}
+          </button>
+        </div>
+        <div v-if="availableModels.length > 0" class="flex space-x-2">
+          <select v-model="formApi.selected_model" class="flex-1 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+            <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+          </select>
+          <input v-model="formApi.selected_model" placeholder="手动输入" class="w-32 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-2 py-2 outline-none font-mono">
+        </div>
+        <input v-else v-model="formApi.selected_model" type="text" placeholder="例如: deepseek-chat, gpt-4o" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+      </div>
+    </div>
+
+    <!-- 底部操作栏：左侧删除，右侧取消/保存 -->
+    <div class="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-dark-700">
+      <div>
+        <!-- 仅当当前配置名称确实存在于后端库中时，才展示删除按钮 -->
+        <button v-if="state.api_profiles[formApi.name]"
+                @click="deleteApiProfile(formApi.name)"
+                class="px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/80 rounded-lg text-xs font-semibold flex items-center transition">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i>删除此配置
+        </button>
+      </div>
+      <div class="flex space-x-2">
+        <button @click="closeModal('api')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+        <button @click="saveApiProfile" class="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-xs font-medium">保存配置</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+    <!-- 4. 系统配置与安全管理模态框 -->
+    <div v-if="modals.scan_config" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <h3 class="font-bold text-sm flex items-center"><i data-lucide="folder-cog" class="w-4 h-4 mr-2 text-sky-500"></i>系统配置与安全管理</h3>
+          <button @click="closeModal('scan_config')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block text-gray-500 dark:text-gray-400 mb-1 font-semibold">1. 默认扫描根目录 (工作区沙箱根):</label>
+            <div class="flex items-center space-x-2">
+              <input v-model="formScan.target_path" type="text" class="flex-1 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+              <button @click="browseDirectory" :disabled="isBrowsingDir" class="px-3 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg font-medium">📂 浏览</button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-gray-500 dark:text-gray-400 mb-1 font-semibold">2. 默认扫描深度 (Depth):</label>
+            <div class="flex items-center space-x-3">
+              <input v-model.number="formScan.max_depth" type="number" min="1" max="10" class="w-20 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+              <button @click="runTokenEstimation" :disabled="isEstimating" class="px-3 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg font-medium flex items-center">
+                <i data-lucide="search" class="w-3.5 h-3.5 mr-1" :class="{'animate-spin': isEstimating}"></i>
+                {{ isEstimating ? '测算中...' : '🔍 预估地图 Token' }}
+              </button>
+            </div>
+            <div v-if="estimateResult" class="mt-2 p-2.5 bg-gray-100 dark:bg-dark-900/80 border border-gray-300 dark:border-dark-700 rounded-lg font-mono text-[11px] space-y-1">
+              <div>📄 一次压缩 (标准): ~{{ formatTokens(estimateResult.primary_tokens) }} t</div>
+              <div class="text-amber-500">⚡ 二次压缩 (深度): ~{{ formatTokens(estimateResult.deep_tokens) }} t</div>
+              <div :class="estimateResult.is_deep_suggested ? 'text-rose-500 font-bold' : 'text-emerald-500'">
+                预估生效: {{ estimateResult.is_deep_suggested ? '⚡ 将触发二次压缩 (超出预警阈值)' : '📄 将启用标准一次压缩' }}
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-gray-500 dark:text-gray-400 mb-1 font-semibold">3. 工具返回 Token 告警阈值:</label>
+            <input v-model.number="formScan.tool_token_warning_threshold" type="number" class="w-36 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+          </div>
+          <div>
+            <label class="block text-gray-500 dark:text-gray-400 mb-1 font-semibold">4. 黑名单拦截路径 (每行一个):</label>
+            <textarea v-model="formScan.blacklist_str" rows="2" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono"></textarea>
+          </div>
+          <!-- 安全控制与密码中心 -->
+          <div class="border border-gray-200 dark:border-dark-700 bg-gray-50 dark:bg-dark-750 p-3 rounded-xl space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold flex items-center">
+                <i data-lucide="shield" class="w-3.5 h-3.5 mr-1 text-emerald-500"></i>安全权限中心
+              </span>
+              <button @click="openPasswordModal(false)" class="px-2.5 py-1 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 text-brand-600 dark:text-brand-400 rounded text-xs">
+                🔐 {{ state.has_password ? '修改管理密码' : '设置初始密码' }}
+              </button>
+            </div>
+            <div class="text-[11px] text-gray-500 dark:text-gray-400">
+              状态: <span :class="state.has_password ? 'text-emerald-500' : 'text-rose-500'">{{ state.has_password ? '已设置主管理密码' : '⚠️ 尚未设置主密码' }}</span>
+            </div>
+            <div class="space-y-1.5 pt-1">
+              <div @click="handleTogglePermSensitive" class="flex items-center space-x-2 text-gray-700 dark:text-gray-300 cursor-pointer select-none">
+                <input type="checkbox" :checked="formScan.permanent_skip_sensitive" class="pointer-events-none rounded bg-white dark:bg-dark-900 border-gray-300 dark:border-dark-600 text-brand-600">
+                <span>永久免提醒：普通敏感操作 (常规剪切/重命名直接执行)</span>
+              </div>
+              <div @click="handleTogglePermDestructive" class="flex items-center space-x-2 text-rose-600 dark:text-rose-400 font-medium cursor-pointer select-none">
+                <input type="checkbox" :checked="formScan.permanent_skip_destructive" class="pointer-events-none rounded bg-white dark:bg-dark-900 border-gray-300 dark:border-dark-600 text-rose-600">
+                <span>⚠️ 永久免验证普通破坏性操作 (强制覆盖/删除免密码，对3级资产无效)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-gray-200 dark:border-dark-700">
+          <button @click="closeModal('scan_config')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+          <button @click="saveScanConfig" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-medium">保存全部配置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. 永久跳过高危警告确认模态框 -->
+    <div v-if="permSkipWarning.visible" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border-2 border-rose-600/80 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+        <div class="flex items-center space-x-3 text-rose-500">
+          <i data-lucide="alert-octagon" class="w-8 h-8 flex-shrink-0"></i>
+          <div>
+            <h3 class="font-bold text-sm">高危安全警报确认</h3>
+            <p class="text-xs text-rose-400 mt-0.5">您正在开启针对【{{ permSkipWarning.level_name }}】的永久免提醒！</p>
+          </div>
+        </div>
+        <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed bg-gray-100 dark:bg-dark-900/60 p-3 rounded-xl border border-gray-300 dark:border-dark-700">
+          开启后，Agent 在执行此类破坏性操作时都将直接穿透执行，不再弹出拦截。<br><br>
+          <span class="text-rose-500 font-semibold">⚠️ 若模型出现幻觉，可能会导致本地不可逆的文件修改。确定要永久跳过吗？</span>
+        </p>
+        <div class="flex justify-end space-x-3 pt-2">
+          <button @click="confirmPermSkip(false)" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs font-medium">取消 (保持安全拦截)</button>
+          <button @click="confirmPermSkip(true)" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold">确认永久跳过保护</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. 主管理密码独立维护模态框 (支持引导模式) -->
+    <div v-if="modals.password" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-2">
+          <h3 class="font-bold text-sm flex items-center">
+            <i data-lucide="lock" class="w-4 h-4 mr-2 text-brand-500"></i>
+            {{ isPasswordGuideMode ? '🔒 设置主管理密码（启用 3 级机密防护）' : (state.has_password ? '修改管理密码' : '设置主管理密码') }}
+          </h3>
+          <button @click="closeModal('password')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div v-if="isPasswordGuideMode" class="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded text-rose-700 dark:text-rose-300">
+            提示：系统要求设置主管理密码后方可打标或操作 3 级（机密）资产。
+          </div>
+          <div v-if="state.has_password && !isPasswordGuideMode">
+            <label class="block text-gray-500 dark:text-gray-400 mb-1">当前原密码:</label>
+            <input v-model="formPassword.old_password" type="password" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+          </div>
+          <div>
+            <label class="block text-gray-500 dark:text-gray-400 mb-1">新管理密码:</label>
+            <input v-model="formPassword.new_password" type="password" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+          </div>
+          <div>
+            <label class="block text-gray-500 dark:text-gray-400 mb-1">确认新管理密码:</label>
+            <input v-model="formPassword.confirm_password" type="password" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+          </div>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-gray-200 dark:border-dark-700">
+          <button @click="closeModal('password')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+          <button @click="submitPasswordChange" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-medium">确认设置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. 快捷指令管理模态框 -->
+    <div v-if="modals.fast_chat" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <h3 class="font-bold text-sm flex items-center"><i data-lucide="zap" class="w-4 h-4 mr-2 text-yellow-500"></i>快捷指令管理</h3>
+          <button @click="closeModal('fast_chat')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+          <div v-for="(item, idx) in formFastChats" :key="idx" class="flex items-center space-x-2 bg-gray-50 dark:bg-dark-900/50 p-2 rounded-lg border border-gray-200 dark:border-dark-700">
+            <input v-model="item.title" placeholder="标题" class="w-24 bg-white dark:bg-dark-800 border border-gray-300 dark:border-dark-600 rounded px-2 py-1 text-xs outline-none">
+            <input v-model="item.content" placeholder="指令正文" class="flex-1 bg-white dark:bg-dark-800 border border-gray-300 dark:border-dark-600 rounded px-2 py-1 text-xs outline-none">
+            <button @click="formFastChats.splice(idx, 1)" class="text-rose-500 hover:text-rose-600 p-1"><i data-lucide="trash" class="w-3.5 h-3.5"></i></button>
+          </div>
+        </div>
+        <button @click="formFastChats.push({title: '新指令', content: ''})" class="w-full py-1.5 border border-dashed border-gray-300 dark:border-dark-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:text-gray-200 transition">+ 添加指令</button>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-gray-200 dark:border-dark-700">
+          <button @click="closeModal('fast_chat')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+          <button @click="saveFastChats" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-medium">保存指令</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. 编辑系统提示词模态框 -->
+    <div v-if="modals.edit_sys_prompt" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <h3 class="font-bold text-sm">编辑系统提示词</h3>
+          <button @click="closeModal('edit_sys_prompt')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <textarea v-model="tempSysPrompt" rows="9" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg p-3 text-xs outline-none font-mono"></textarea>
+        <div class="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-dark-700">
+          <button @click="resetSystemPromptDefault" class="px-3 py-2 bg-gray-200 dark:bg-dark-700 text-gray-600 dark:text-gray-400 rounded-lg text-xs font-medium flex items-center">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 mr-1"></i>恢复默认提示词
+          </button>
+          <div class="flex space-x-2">
+            <button @click="closeModal('edit_sys_prompt')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+            <button @click="saveSystemPrompt" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-medium">保存修改</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. 添加临时提示词模态框 -->
+    <div v-if="modals.add_temp_prompt" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <h3 class="font-bold text-sm">添加临时提示词/规则</h3>
+          <button @click="closeModal('add_temp_prompt')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <input v-model="formTempPrompt.title" placeholder="规则标题 (展示在侧边栏)" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+          <textarea v-model="formTempPrompt.content" rows="6" placeholder="提示词具体正文 (注入 LLM 上下文)..." class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-gray-200 dark:border-dark-700">
+          <button @click="closeModal('add_temp_prompt')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+          <button @click="saveTempPrompt" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-medium">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. 编辑临时提示词模态框 -->
+    <div v-if="modals.edit_temp_prompt" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl text-gray-800 dark:text-gray-100">
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-dark-700 pb-3">
+          <h3 class="font-bold text-sm">编辑临时提示词</h3>
+          <button @click="closeModal('edit_temp_prompt')" class="text-gray-400 hover:text-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <input v-model="formEditTempPrompt.title" placeholder="规则标题" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none">
+          <textarea v-model="formEditTempPrompt.content" rows="6" placeholder="提示词内容..." class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-gray-200 dark:border-dark-700">
+          <button @click="closeModal('edit_temp_prompt')" class="px-4 py-2 bg-gray-200 dark:bg-dark-700 rounded-lg text-xs">取消</button>
+          <button @click="saveEditTempPrompt" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-medium">保存修改</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
