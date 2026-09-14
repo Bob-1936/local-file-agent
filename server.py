@@ -418,10 +418,9 @@ async def agent_sse_generator(req: SendChatRequest) -> AsyncGenerator[str, None]
     async def _async_security_intercept(act_name: str, act_params: dict) -> Tuple[bool, str, dict]:
         """
         严谨的全工具安全切面拦截：
+        - 覆盖所有入参中的资产路径（包括 parent_path / target_dir 等）；
         - 实时从全局唯一 AssetSecurityManager 读取最新等级；
-        - 涉及 2/3 级资产绝不豁免放行，强制阻断；
-        - 精准处理 set_security_level：升级至 3 级校验密码，降级操作产生全员降级警报并校验密码；
-        - 精准处理 rename_file：支持 path/id 自适应解析与同名冲突挂起预检。
+        - 命中 2/3 级受控资产时强制阻断并触发 HITL 确认/密码校验。
         """
         effective_params = dict(act_params)
         raw_items_meta = []
@@ -437,18 +436,30 @@ async def agent_sse_generator(req: SendChatRequest) -> AsyncGenerator[str, None]
             if records:
                 involved_paths.append(records[0][1])
 
-        raw_files = (
-            effective_params.get("files") or
-            effective_params.get("file_path") or
-            effective_params.get("output_zip") or
-            effective_params.get("dir_path") or
-            effective_params.get("zip_path") or []
-        )
-        file_list = raw_files if isinstance(raw_files, list) else [raw_files]
-        for f in file_list:
-            if not f:
+        # 【核心修复】：聚合所有可能包含路径的参数字段，避免短路遗漏 parent_path 或 target_dir
+        path_fields = [
+            "files", "file_path", "parent_path", "target_dir",
+            "dir_path", "output_zip", "zip_path"
+        ]
+        file_list = []
+        for field in path_fields:
+            val = effective_params.get(field)
+            if not val:
                 continue
-            f_str = str(f)
+            if isinstance(val, list):
+                file_list.extend([str(x) for x in val if x])
+            else:
+                file_list.append(str(val))
+
+        # 去重保留顺序
+        seen_files = set()
+        deduped_file_list = []
+        for f in file_list:
+            if f not in seen_files:
+                seen_files.add(f)
+                deduped_file_list.append(f)
+
+        for f_str in deduped_file_list:
             records = session.file_tool._resolve_file_records(f_str)
             resolved_p = records[0][1] if records else f_str
             involved_paths.append(resolved_p)

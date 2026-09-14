@@ -1,154 +1,170 @@
-# Local File Agent (本地文件智能管理助手 - 2026 Web)
+# Local File Agent (Web Edition)
 
-`Local File Agent (Web Edition)` 是一套基于 **LangGraph 异步图状态机** 与现代化轻量响应式 Web 技术栈构建的工业级本地资产智能体系统。系统深度集成本地关系型数据库（**SQLite3 WAL + FTS5 倒排索引**）、嵌入式向量检索引擎（**LanceDB + Arrow**）以及全生态大语言模型（**DeepSeek / OpenAI / Claude / Gemini / Ollama / 本地兼容端点**）。
+`Local File Agent` 是一套基于 **LangGraph 异步图状态机** 与现代化轻量响应式 Web 技术栈构建的本地受控文件管理智能体系统。系统深度集成本地关系型数据库（**SQLite3 WAL + FTS5** 倒排索引）、嵌入式向量检索引擎（**LanceDB + Apache Arrow**），支持 OpenAI、DeepSeek、Claude、Gemini 以及本地 Ollama 等多种大语言模型端点。
 
-系统采用“**宏观全景树状模式聚类压缩**”与“**微观多路混合检索 (RRF)**”双轨架构，支持 **15 大全功能本地资产工具套件**。本次重大工业级重构彻底解决并落地了 **AI 自主安全等级调整与升降级密码防护**、**AI 文件与文件夹路径自愈重命名**、**三级资产安全等级单例防护与热重载**、**跨目录移动全员真降级与数据库联动**、**原地操作自愈反馈**、**全工具覆盖冲突免密换名 vs 高危密码覆盖**、**脱离 Agent 的原生原子撤销 (Undo Stack)**、**5 维物理安全预检** 以及 **Web 控制面板防折行样式加固**，确保达到生产级的稳定鲁棒性与绝对的物理数据安全。
+系统针对大语言模型直接操作本地文件系统时的 **“越权破坏”、“幻觉覆盖”、“多步调用穿透”以及“上下文窗口超载”** 等现实工程问题进行针对性设计。通过人机协同网关（HITL）、三级资产安全模型、动态权限继承以及基于文件流水账的确定性回滚机制，在充分发挥智能体自主执行能力的同时，严守物理端侧数据安全底线。
 
-<img src="/assets/主界面.jpg" alt="操作演示" class="rounded-lg shadow" />
+<div align="center">
+  <img src="assets/主界面.jpg" alt="系统主控制台全景" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); max-width: 95%;" />
+  <p><em>▲ 系统主控制台全景：集成流式思考链、多 Profile 切换、无 Agent 事务撤销探针与细粒度资产安全管理</em></p>
+</div>
 
 ---
 
 ## 目录
-- [架构演进与核心特性](#架构演进与核心特性)
+- [背景与核心痛点分析](#背景与核心痛点分析)
+- [核心功能实战演示 (GIF 矩阵)](#核心功能实战演示-gif-矩阵)
+  - [1. 交互控制台与全局状态感知](#1-交互控制台与全局状态感知)
+  - [2. 目录树扫描与模板诱导压缩](#2-目录树扫描与模板诱导压缩)
+  - [3. 细粒度资产鉴权：敏感与机密资产按级读取](#3-细粒度资产鉴权敏感与机密资产按级读取)
+  - [4. 智能体自主安全治理：安全降级挂起拦截](#4-智能体自主安全治理安全降级挂起拦截)
+  - [5. 混合检索定位与原子安全打包](#5-混合检索定位与原子安全打包)
 - [完整项目目录图谱](#完整项目目录图谱)
-- [文件职责与功能矩阵](#文件职责与功能矩阵)
-- [关键技术机制深度剖析](#关键技术机制深度剖析)
-  - [1. 三级资产安全防护与 AI 自主设级 (Security Levels)](#1-三级资产安全防护与-ai-自主设级-security-levels)
-  - [2. AI 智能自愈重命名机制 (文件/目录双轨适配)](#2-ai-智能自愈重命名机制-文件目录双轨适配)
-  - [3. 跨目录移动“全员降级”真实生效机制](#3-跨目录移动全员降级真实生效机制)
-  - [4. 原地移动自愈反馈 (根治模型试错重试)](#4-原地移动自愈反馈-根治模型试错重试)
-  - [5. 5 维危险操作物理预检引擎 (Pre-check Engine)](#5-5-维危险操作物理预检引擎-pre-check-engine)
-  - [6. 覆盖与命名冲突严格阻断：免密更名 vs 高危密码覆盖](#6-覆盖与命名冲突严格阻断免密更名-vs-高危密码覆盖)
-  - [7. 脱离 Agent 的原生原子撤销与生命周期隔离 (Undo Stack)](#7-脱离-agent-的原生原子撤销与生命周期隔离-undo-stack)
-  - [8. 全生命周期操作审计日志 (Operation Audit Logs)](#8-全生命周期操作审计日志-operation-audit-logs)
-- [15 大强类型工具契约矩阵](#15-大强类型工具契约矩阵)
+- [文件职责与模块矩阵](#文件职责与模块矩阵)
+- [核心工程机制与关键实现](#核心工程机制与关键实现)
+  - [1. 批处理断路保护机制 (Circuit-Breaker Batch Execution)](#1-批处理断路保护机制-circuit-breaker-batch-execution)
+  - [2. 基于文件拓扑的三级安全模型与动态继承](#2-基于文件拓扑的三级安全模型与动态继承)
+  - [3. 确定性文件流水账回滚系统 (Journal-based Undo)](#3-确定性文件流水账回滚系统-journal-based-undo)
+  - [4. 物理操作前置防御引擎 (Pre-check Engine)](#4-物理操作前置防御引擎-pre-check-engine)
+  - [5. 轻量级全离线混合检索 (Dense + Sparse Hybrid Search via RRF)](#5-轻量级全离线混合检索-dense--sparse-hybrid-search-via-rrf)
+  - [6. 实测性能基准与压缩效果指标 (Benchmarks & Metrics)](#6-实测性能基准与压缩效果指标-benchmarks--metrics)
+- [15 项受控工具强类型契约矩阵](#15-项受控工具强类型契约矩阵)
+- [系统架构与时序交互图](#系统架构与时序交互图)
+- [已知工程边界与设计权衡 (Known Limitations & Trade-offs)](#已知工程边界与设计权衡-known-limitations--trade-offs)
 - [快速启动与部署说明](#快速启动与部署说明)
 - [技术栈与环境依赖](#技术栈与环境依赖)
 
 ---
 
-## 架构演进与核心特性
+## 背景与核心痛点分析
 
-对比传统的脚本式 Agent 与桌面管理工具，本系统实现了十一项工业级技术演进：
+大语言模型（LLM）直接接入操作系统物理文件管理时，面临一系列严重的可靠性与安全性挑战：
 
-1. **AI 自主资产安全等级调整（`set_security_level`）与升降级严谨拦截**：
-   赋予大模型直接调整特定文件或文件夹安全级别（1普通/2敏感/3机密）的能力。
-   * **升级防护**：调整至 3 级（机密）时，切面网关强制定级为破坏性高危动作，**强制验证主管理密码**；
-   * **降级警报**：当试图将 2/3 级资产降低安全等级时，系统主动挂起并弹出“全员安全降级警报”，原 3 级降级必须输入主密码确认；
-   * **继承清理**：文件夹设为 2/3 级后，底层自动将下属所有已显式打标的子项重置为 1 级（统一由父级动态继承）；
-   * **可撤销自愈**：操作自动写入流水，支持原生点击“↩ 撤销”恢复到修改前的安全等级。
-2. **AI 文件与文件夹路径自愈重命名（`rename_file`）彻底解脱 ID 束缚**：
-   彻底重构了传统工具必须传入整型 `file_id` 的痛点。大模型可直接传相对路径、绝对路径或名称（`file_path`）。若目标文件或文件夹尚未被数据库索引，系统执行**未入库自动即时建索**自愈补齐 ID，无缝支持物理重命名、同名冲突前置挂起、撤销逆向回转以及灾备映射自动重绑定。
-3. **三级资产安全等级全局单例与热感知（彻底根除实例孤岛）**：
-   在 `core/security.py` 中将 `AssetSecurityManager` 构建为进程级单例（`AssetSecurityManager.get_instance`），搭载基于文件修改时间（`mtime`）的热重载引擎。无论前端在 Web 面板上批量打标、AI 在后台调工具，还是安全网关切面校验，始终读取同一份绝对同步的内存缓存。
-4. **跨目录移动“全员降级”真抹标与数据库同步**：
-   严格落实业务规范——“**资产移入低安全级别目录后，所有文件一同降级**”。当用户在弹窗中批准降级并输入密码后，底层从灾备清单中彻底抹除原有高等级显式标记，并级联更新 SQLite 数据库中的 `files.security_level`。
-5. **原地移动自愈反馈（根除模型反复试错）**：
-   当 Agent 发起原地移动（`src_path == dest_path`）时，底层不再静默 `continue` 返回空结果，而是主动向 Agent 明确返回“资产已在目标目录下，无需移动（原地保持成功）”，模型立刻获知状态并自然收敛。
-6. **前端资产管理面板防折行样式加固**：
-   全面修复 CSS 自适应排版缺陷。关键列（标记来源、安全等级 Badge、操作按钮）增加 `whitespace-nowrap`、`min-w` 以及徽章的 `inline-flex shrink-0` 保护，文字与彩色徽章绝不折行成垂直竖排。
-7. **Windows 全平台路径大小写自适应归一化**：
-   针对 Windows 环境下的盘符大小写（`C:\` vs `c:\`）和斜杠混用隐患，底层采用跨平台 `os.path.normcase` 规范化，灾备字典采用不区分大小写的键值容错查找。
-8. **5 维危险操作物理预检引擎 (Pre-check Engine)**：
-   在任何涉及磁盘变动的操作触碰物理介质前，自动执行 5 维预检：**磁盘空间余量探测（低阈值熔断）**、**Zip Slip 恶意路径穿越拦截**、**压缩炸弹防御（膨胀比/文件数/释放体积三重硬顶）**、**符号链接逃逸拦截** 以及 **目标覆盖冲突探测**。
-9. **凡覆盖皆危险：免密换名 vs 高危密码覆盖**：
-   * **更换名称**：常规安全操作，弹窗提供新文件名输入框，**免密放行继续执行**；
-   * **覆盖替换**：凡导致已有文件被抹除覆盖的操作，**统一定级为破坏性高危动作，强制验证主管理密码**；
-   * **前置挂起拦截**：覆盖 `move_file`、`copy_file`、`write_file`、`extract_archive` 与 `rename_file`，在触碰磁盘前强行挂起呼出 Web 模态框。
-10. **脱离 Agent 的原生原子撤销（Undo Stack，带互斥锁与生命周期隔离）**：
-    用户点击顶栏“↩ 撤销上一步”时，**完全不经过大模型与 LangGraph 图调度，直接由后端读取本地物理流水执行原子反转**。
-    * **覆盖备份自愈**：覆盖发生前在 `.local_agent_undo_backups` 产生快照，撤销时原样无损还原；
-    * **逆向级联恢复**：支持移动还原、重命名改回原名、解压清理、打包删除以及安全等级回滚；
-    * **生命周期隔离**：服务重启时自动清空操作流水栈，绝不跨会话误撤回历史文件。
-11. **全生命周期合规操作审计日志 (`audit_logs`)**：
-    SQLite 独立持久化存储 `audit_logs` 表，全屏看板实时查阅，记录操作人、时间、动作、等级、涉及资产与明细。
+| 现实痛点场景 | 传统 Agent 方案缺陷 | 本系统工程对策 |
+| :--- | :--- | :--- |
+| **上下文溢出与成本超载** | 遍历中大型项目目录生成数万行文件树，瞬间撑爆上下文窗口或产生高昂 Token 开销。 | **分层时间切片（80/10/10 抽样）** + **正则模式诱导压缩**，将高熵重复结构归纳折叠为通用骨架。 |
+| **机密泄漏与权限无差** | 模型无差别访问工作区中的私有文件（如密钥、敏感配置），缺乏细粒度保护。 | **三级资产安全模型（Level 1~3）**：2 级人工确认，3 级**强制核验主管理密码**，且支持目录动态继承。 |
+| **越权降级与逃逸移动** | 用户指令让 Agent 将高密文件移出至外部，原有防护在移入普通目录后失效。 | **跨目录降级防御与状态真抹标**：高等级移入低等级目录判定为降级风险，强行挂起警报并重置底层元数据。 |
+| **多工具连环穿透** | 模型单轮输出多个 Tool Calls，第一个操作被用户取消后，后续调用依然盲目执行。 | **LangGraph 批处理断路节点（Circuit-Breaker）**：前序调用被拒或异常时，批次后续工具秒级熔断阻断。 |
+| **破坏性误覆盖与误删除** | 操作同名文件时直接覆写，或直接调用 `rm` 物理粉碎核心源资产。 | **冲突分流（免密换名 vs 密码覆盖备份）**；删除仅入系统回收站；所有覆写操作在备份区生成暂存快照。 |
+| **撤销依赖 LLM 二次幻觉** | 用户提示“撤销刚刚的操作”，模型常因记忆偏差或缺乏环境感知产生二次破坏。 | **确定性文件流水账（Journal-based Undo）**：完全脱离 LLM，后端线程安全锁驱动物理原子还原。 |
 
 ---
-> 现代化轻量响应式 Web 控制台，集成顶栏无 Agent 原生原子撤销、三级安全防护管理与全生命周期审计日志。
+
+## 核心功能实战演示 (GIF 矩阵)
+
+### 1. 交互控制台与全局状态感知
+基于 FastAPI + SSE 搭建的响应式 Web 控制台，集成流式思考链解析、工具执行状态看板、顶栏无 Agent 原生原子撤销探针与资产快速标注。
 
 <div align="center">
   <img src="assets/展示.gif" width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);" />
-  <p><em>▲ Local File Agent 控制中心与顶栏安全调度功能面板</em></p>
+  <p><em>▲ 图 1：系统主控制中心与运行状态看板</em></p>
 </div>
 
-### 宏观物理扫描与聚类压缩地图
-系统采用旁路挂载与分层时间切片策略，毫秒级遍历复杂物理磁盘，并通过数字模板诱导压缩算法将全景文件树高效载入上下文资料库。
+---
+
+### 2. 目录树扫描与模板诱导压缩
+针对深层物理磁盘，系统采用分层时间切片（80/10/10 策略）快速遍历，并通过文件名通配诱导折叠算法将全景目录树压缩载入上下文临时资料库。
 
 <div align="center">
   <img src="assets/读取信息.gif" width="85%" style="border-radius: 8px; border: 1px solid #30363d;" />
-  <p><em>▲ 磁盘宏观全景物理扫描与树状聚类压缩过程演示</em></p>
+  <p><em>▲ 图 2：宏观物理扫描与目录压缩地图生成过程</em></p>
 </div>
 
-### 核心场景实战：混合检索定位与一键安全打包
-Agent 依据自然语言意图调用 RRF 算法精准定位资产，随后自动执行容量预检并打包为安全 ZIP 压缩包，全流程受安全策略监控与原子撤销栈保护。
+---
+
+### 3. 细粒度资产鉴权：敏感与机密资产按级读取
+系统根据资产的生效安全级别实施差异化动态鉴权：读取受 2 级保护的敏感文件时弹出人机协同确认窗口；读取受 3 级保护的高危机密资产时，切面网关强制定级为破坏性高危动作并**强制核验主管理密码**。
+
+<div align="center">
+  <img src="assets/按等级读取.gif" width="85%" style="border-radius: 8px; border: 1px solid #30363d;" />
+  <p><em>▲ 图 3：同类读取操作按 2 级敏感与 3 级机密实施差异化拦截与主密码鉴权</em></p>
+</div>
+
+---
+
+### 4. 智能体自主安全治理：安全降级挂起拦截
+大模型可通过调用 `set_security_level` 自主管理资产权限。当模型尝试将受保护的目录安全级别调低时，底层切面识别到“安全降级风险”，立即挂起后端执行流并向前端推送降级严重警报，杜绝权限悄然削弱。
+
+<div align="center">
+  <img src="assets/Agent安全等级设置.gif" width="85%" style="border-radius: 8px; border: 1px solid #30363d;" />
+  <p><em>▲ 图 4：Agent 自主触发目录降级并被系统人机协同网关阻断</em></p>
+</div>
+
+---
+
+### 5. 混合检索定位与原子安全打包
+智能体依据自然语言意图调用 RRF 混合检索算法定位目标资产，通过磁盘余量前置预检后安全打包为 ZIP 归档，并在流水表中记录原子撤销凭证。
 
 <div align="center">
   <img src="assets/打包压缩包.gif" width="85%" style="border-radius: 8px; border: 1px solid #30363d;" />
-  <p><em>▲ Agent 自动完成资产检索、匹配校验并制作 ZIP 压缩归档</em></p>
+  <p><em>▲ 图 5：多路检索、空间预检与安全压缩打包全流程</em></p>
 </div>
+
 ---
+
 ## 完整项目目录图谱
 
 ```text
-Agent/
+Local-File-Agent/
 │
-├── config/                          # [配置持久层] 运行时配置、独立安全策略与凭证
+├── config/                          # [配置持久层] 运行时配置、声明式安全策略与凭证
 │   ├── API_config.json              # 大模型多 Profile 配置（设备指纹混淆密文存储）
-│   ├── config.json                  # 主程序运行配置（工作区根目录、深度、黑名单、Token阈值、密码哈希）
+│   ├── config.json                  # 主程序运行配置（工作区根目录、扫描深度、黑名单、Token阈值、主密码散列）
 │   ├── fast_chat.json               # 快捷指令预设定义
-│   └── security_policy.json         # 【核心解耦】15 大工具声明式安全策略、动态规则、别名与细粒度豁免表
+│   └── security_policy.json         # 15 大工具声明式安全策略、动态别名与单工具豁免表
 │
-├── core/                            # [核心系统层] 图内核编排、存储中枢与安全机制
-│   ├── agent_graph_web.py           # Web 异步 LangGraph 图状态机、批处理短路节点、思考流解析
-│   ├── indexer_engine.py            # SQLite3 WAL + FTS5 与 LanceDB 双库引擎；流水表、审计表与重命名核心
-│   ├── model_factory.py             # 统一模型工厂：OpenAI/DeepSeek/Claude/Gemini 原生参数清洗与代理端点处理
-│   ├── security.py                  # 【单例重构】安全管控中枢、AssetSecurityManager 全局单例、mtime热感知、全员降级抹标、5 维危险预检
-│   └── tokenizer.py                 # 本地离线多平台 Token 计数器（适配 OpenAI 与 Gemini 拟合算法）
+├── core/                            # [核心系统层] 图内核编排、存储底座与安全管控中枢
+│   ├── agent_graph_web.py           # Web 异步 LangGraph 图状态机、SafeAsyncToolBatchNode 批处理断路节点
+│   ├── indexer_engine.py            # SQLite3 WAL + FTS5 与 LanceDB 双库引擎；流水表、审计表与实体级联
+│   ├── model_factory.py             # 统一模型工厂：OpenAI/DeepSeek/Claude/Gemini 原生参数清洗与反向代理适配
+│   ├── security.py                  # 安全管控中枢：AssetSecurityManager 单例、mtime 热感知、降级抹标、物理预检
+│   └── tokenizer.py                 # 本地离线多平台 Token 计数器（适配 OpenAI cl100k 与 Gemini 拟合算法）
 │
 ├── data/                            # [数据持久层] 索引库、向量表、宏观扫描快照与常驻资料
 │   ├── asset_security_levels.json   # 【核心灾备】非 1 级资产显式等级独立清单 (相对路径持久化，冷启动自愈)
 │   ├── database/                    # SQLite 关系型数据库目录 (file_indexer.db)
-│   ├── lancedb/                     # LanceDB 本地向量表目录
+│   ├── lancedb/                     # LanceDB 本地向量表目录 (file_embeddings)
 │   └── scan/                        # 磁盘物理扫描原始 JSON 快照与聚类压缩 Markdown 地图
 │
 ├── tools/                           # [业务工具层] 强类型契约工具与提示词装配
 │   ├── agent_tools_web.py           # Web 强契约工具工厂：全量 15 大工具统一切面拦截、Pydantic Schema 约束
-│   ├── file_manager_tool.py         # 【核心自愈】AI重命名路径自愈、AI调整安全等级、原地移动反馈、降级抹标、原子撤销
-│   ├── prompt_manager.py            # 提示词上下文与会话事务管理器（深拷贝快照回滚、工作区物理锚定、边界截断）
+│   ├── file_manager_tool.py         # 资产操作实现：AI重命名自愈、安全等级设定、降级抹标、原子撤销执行器
+│   ├── prompt_manager.py            # 提示词上下文与会话事务管理器（事务快照回滚、工作区基准锚定）
 │   ├── scan_indexer.py              # 地图聚类压缩引擎：数字模式诱导、两阶段深度压缩、兄弟目录聚合
-│   └── scanner.py                   # 磁盘物理扫描器：分层时间切片（80/10/10 策略）、目录预算熔断与死循环检测
+│   └── scanner.py                   # 磁盘物理扫描器：分层时间切片（80/10/10 策略）、目录预算熔断与死循环防御
 │
-├── web/                             # [界面表现层] 现代响应式前端（免构建、零依赖）
+├── web/                             # [界面表现层] 现代响应式前端（免构建、零 npm 依赖）
 │   ├── vendor/                      # 本地离线第三方静态库 (Tailwind, Vue, Lucide, Highlight, Markdown-it)
-│   ├── app.js                       # Vue 3 核心驱动：SSE 流式拼装、撤销状态探针置灰、互斥锁定、HITL 冲突与密码核验
-│   └── index.html                   # 【排版加固】资产管理面板防折行修复、深浅色自适应、审计日志看板、HITL 冲突与鉴权模态框
+│   ├── app.js                       # Vue 3 核心驱动：SSE 流式拼装、撤销状态探针、HITL 冲突分流与密码核验
+│   └── index.html                   # 资产管理面板防折行排版、审计日志看板、HITL 鉴权模态框
 │
-├── run_web.py                       # 【程序总启动入口】可用端口自增探测、浏览器延迟拉起与 Uvicorn 引导
-└── server.py                        # 【API 与服务总调度】FastAPI 后端、单例注入、升降级与重命名切面拦截、HITL 鉴权
+├── run_web.py                       # 【程序启动入口】可用端口探测、浏览器自动拉起与 Uvicorn 引导
+└── server.py                        # 【API 与服务中枢】FastAPI 后端、单例注入、升降级切面拦截、HITL 鉴权
 ```
 
 ---
 
-## 文件职责与功能矩阵
+## 文件职责与模块矩阵
 
 ### 1. 服务调度与启动入口
 
 | 文件名 | 模块归属 | 核心职责说明 |
 | :--- | :---: | :--- |
 | **`run_web.py`** | 启动入口 | 自动在 `[9000, 9050)` 区间探测未占用端口；服务就绪后后台子线程延迟 1.2 秒自动拉起系统默认浏览器；引导运行 `uvicorn.run("server:app")`。 |
-| **`server.py`** | 服务核心 | FastAPI 后端调度；全局单例绑定；**接入 `set_security_level` 升降级切面拦截与主密码核验**；**重构 `rename_file` 路径冲突前置挂起**；提供原生撤销端点 (`POST /api/fs/undo`) 与状态探针；审计日志查询。 |
+| **`server.py`** | 服务核心 | FastAPI 后端网关；全局单例绑定；**接入 `set_security_level` 升降级切面拦截与主密码核验**；**实现同名冲突前置挂起**；提供原生撤销端点 (`POST /api/fs/undo`) 与状态探针；审计日志查询。 |
 
 ---
 
-### 2. `core/` 核心图引擎、持久化与安全中枢
+### 2. `core/` 核心图引擎、存储与安全中枢
 
 | 文件名 | 模块归属 | 核心职责说明 |
 | :--- | :---: | :--- |
-| **`security.py`** | 安全中枢 | **`AssetSecurityManager` 进程级全局单例**，搭载 `_check_and_reload` 磁盘变动热重载；**跨目录降级全员抹标机制 (`handle_transfer_security_levels`)**；全平台 Windows 路径大小写归一化；PBKDF2 加盐散列；**5 维危险预检引擎**。 |
+| **`security.py`** | 安全中枢 | **`AssetSecurityManager` 进程级单例**，搭载 `_check_and_reload` 磁盘变动热感知；**跨目录降级全员抹标机制 (`handle_transfer_security_levels`)**；全平台 Windows 路径大小写归一化；PBKDF2 加盐散列；**5 维物理危险预检引擎**。 |
 | **`indexer_engine.py`** | 数据引擎 | 管理 SQLite3 WAL 模式与 LanceDB 向量表；维护 **`operation_journal`（流水表）** 与 **`audit_logs`（审计表）**；启动清库后依据 `data/asset_security_levels.json` 自动灾备重灌安全等级；**底层物理重命名与子目录级联同步**。 |
-| **`agent_graph_web.py`** | 图状态机 | 编译强类型 `WebAgentState` 图；实现 `SafeAsyncToolBatchNode`（前序被拒后续秒级短路阻断）；内置 `WebThinkingStreamParser`（提取 `<think>` 流）与正文 Markdown JSON 容错反解。 |
-| **`model_factory.py`** | 模型适配 | 统一构建 OpenAI、DeepSeek、Claude、Gemini 标准实例；自动清洗反向代理与端点协议。 |
-| **`tokenizer.py`** | 分词估算 | 本地离线多平台 Token 计数器；适配 OpenAI/DeepSeek (cl100k) 与 Gemini 专用拟合规则。 |
+| **`agent_graph_web.py`** | 图状态机 | 编译强类型 `WebAgentState` 循环图；实现 **`SafeAsyncToolBatchNode`（前序被拒后续秒级短路断路器）**；内置 `WebThinkingStreamParser`（提取 `<think>` 流）与正文 Markdown JSON 容错反解。 |
+| **`model_factory.py`** | 模型适配 | 统一构建 OpenAI、DeepSeek、Claude、Gemini 标准实例；自动清洗反向代理与端点协议前缀。 |
+| **`tokenizer.py`** | 分词估算 | 本地离线多平台 Token 计数器；适配 OpenAI/DeepSeek (BPE cl100k) 与 Gemini 专用拟合规则。 |
 
 ---
 
@@ -156,11 +172,11 @@ Agent/
 
 | 文件名 | 模块归属 | 核心职责说明 |
 | :--- | :---: | :--- |
-| **`agent_tools_web.py`** | 工具契约 | 采用 Pydantic 严格约束输入 Schema；**扩展至 15 大工具**；**重构 `rename_file` 契约支持路径与 ID**；**新增 `set_security_level` 契约**；全量工具统一切面拦截（`_check_security`）。 |
-| **`file_manager_tool.py`** | 资产管理 | **新增 `set_security_level`（物理/数据库/灾备/撤销流水四重联动）**；**重写 `rename_file` 智能自愈解析（支持未入库自愈建索）**；原地移动自愈反馈；移动降级真实抹标；原生原子撤销引擎 (`undo_last_operation`)。 |
-| **`prompt_manager.py`** | 提示词与事务 | 动态组装工作区沙箱物理基准；**注入 15 大工具清单、AI 设级原则与重命名规范**；换名免密 vs 覆盖密码原则；会话事务管理（`begin` / `rollback` / `commit`）。 |
+| **`agent_tools_web.py`** | 工具契约 | 采用 Pydantic 严格约束输入 Schema；**管理 15 项受控工具**；全量工具统一切面拦截（`_check_security`）。 |
+| **`file_manager_tool.py`** | 资产管理 | **`set_security_level` 核心实现（物理/数据库/灾备/撤销流水四重联动）**；**重写 `rename_file` 智能自愈解析（支持未入库即时建索）**；原地移动自愈反馈；移动降级真实抹标；原生原子撤销引擎 (`undo_last_operation`)。 |
+| **`prompt_manager.py`** | 提示词与事务 | 动态组装工作区沙箱物理基准；注入 15 项工具清单、安全设级原则与重命名规范；免密换名 vs 密码覆盖原则；会话事务管理（`begin` / `rollback` / `commit`）。 |
 | **`scan_indexer.py`** | 聚类压缩 | 分析文件名数字模式诱导归纳正则模板；提供标准与二次深度压缩双模式；相似兄弟目录聚合折叠。 |
-| **`scanner.py`** | 物理扫描 | 单目录 3000 项遍历预算熔断与软链接死循环防御；分层时间切片算法极速构建全景文件树。 |
+| **`scanner.py`** | 物理扫描 | 单目录 3000 项遍历预算熔断与软链接死循环防御；分层时间切片算法快速构建全景文件树。 |
 
 ---
 
@@ -168,115 +184,177 @@ Agent/
 
 | 文件名 | 模块归属 | 核心职责说明 |
 | :--- | :---: | :--- |
-| **`security_policy.json`** | 策略配置 | 外部解耦安全规则表。定义 15 大动作的基础风险等级（`base_level`）、操作说明、多语言别名映射（`aliases`）与单工具免确认清单（`tool_exemptions`）。 |
-| **`index.html`** | 页面骨架 | 资产安全管理面板排版加固（`whitespace-nowrap`、列宽锁死、杜绝汉字垂直竖排）；顶栏集成【↩ 撤销上一步】与【📋 审计日志】；HITL 模态框清晰分离【更名免密】与【覆盖密码】。 |
-| **`app.js`** | 交互驱动 | Vue 3 构建；SSE 流式增量拼装；撤销状态探针与按钮置灰控制；资产管理面板浏览、单选、多选、全选、反选与批量设级。 |
+| **`security_policy.json`** | 策略配置 | 外部解耦安全规则表。定义 15 项动作的基础风险等级（`base_level`）、操作说明、动作别名映射（`aliases`）与单工具免确认清单（`tool_exemptions`）。 |
+| **`index.html`** | 页面骨架 | 资产安全管理面板加固（`whitespace-nowrap`、列宽保护）；顶栏集成【↩ 撤销上一步】与【📋 审计日志】；HITL 模态框清晰分离【更名免密】与【覆盖密码】。 |
+| **`app.js`** | 交互驱动 | 基于 Vue 3 构建；SSE 流式增量拼装；撤销状态探针与按钮置灰控制；资产管理面板浏览、单选、多选、全选、反选与批量设级。 |
 
 ---
 
-## 关键技术机制深度剖析
+## 核心工程机制与关键实现
 
-### 1. 三级资产安全防护与 AI 自主设级 (Security Levels)
-系统严格按照三级保护准则运行：
-* **1 级（普通，默认）**：常规资产，遵循基础策略；
-* **2 级（敏感）**：涉及此类资产的操作强制弹出人机协同窗口进行确认；
-* **3 级（机密高危）**：涉及此类资产的操作（查看 `read_file_content`、移动、复制、重命名等）**强制验证主管理密码**；
-* **动态继承**：文件夹标记为 2 或 3 级后，其下所有子文件和子目录动态继承该最高等级；
-* **AI 自主设级（`set_security_level`）**：
-  * **升为 3 级**：必须输入主密码；
-  * **降级操作**：弹出全员降级严重警报，原为 3 级降级必须输入主密码；
-  * **目录降级子项重置**：目录设级后自动重置子项独立标记；
-  * **撤销保护**：设级操作记录入流水，点击顶栏撤销即可无损还原原等级。
+### 1. 批处理断路保护机制 (Circuit-Breaker Batch Execution)
+原生 Agent 框架在处理单轮多个 `tool_calls` 时常按顺序盲目执行。若批次中某个工具触发安全拦截被用户拒绝，后续工具仍会依据“假设前序操作已成功”的错误前提继续调用，引发链式误改。
+
+本项目在 `core/agent_graph_web.py` 中实现了自定义的 `SafeAsyncToolBatchNode`：
+```text
+[LLM Tool Calls: Tool_A, Tool_B, Tool_C]
+           │
+           ▼
+     [执行 Tool_A] ──► 用户在 HITL 弹窗中点击【取消操作】
+           │
+           ├──► 触发断路熔断 (batch_interrupted = True)
+           │
+           ├──► Tool_B ──► [直接短路跳过，自动回填废弃说明]
+           └──► Tool_C ──► [直接短路跳过，自动回填废弃说明]
+           │
+           ▼
+     [状态流转至 Agent / END] (彻底阻断磁盘与后续动作)
+```
+
+---
+
+### 2. 基于文件拓扑的三级安全模型与动态继承
+系统将沙箱内资产划分为 3 级保护规范：
+* **Level 1 (普通，默认)**：常规工作区文件，遵循声明式策略放行；
+* **Level 2 (敏感)**：涉及该资产的读写、移动、重命名操作强制触发 Web 模态框确认；
+* **Level 3 (机密)**：涉及此类资产的所有物理操作及内容读取，**必须核验 PBKDF2 加盐主管理密码**。
+
+#### 动态继承与全员降级机制
+1. **拓扑动态继承**：任意目录标记为 2 级或 3 级后，其下所有子文件和子目录的生效等级动态提升为该父级最高等级：
+   $$\text{EffectiveLevel}(P) = \max \left( \text{ExplicitLevel}(P), \max_{A \in \text{Ancestors}(P)} \text{ExplicitLevel}(A) \right)$$
+2. **父级统领清理**：目录设置 2/3 级后，系统自动清空其内部已单独打标的子项（恢复为 1 级显式），统一由目录动态继承管理；
+3. **跨目录移动降级真实生效**：当资产从高等级目录剪切至低等级目录时，系统阻断并提示全员降级警报。授权后，底层调用 `handle_transfer_security_levels(..., is_downgrade=True)`，彻底抹除原显式记录并级联更新 SQLite `files.security_level`；
+4. **单例与热感知架构**：`AssetSecurityManager` 在进程中以单例维护，搭载基于磁盘文件 `mtime` 的变动感知器，保证前端面板操作与安全网关拦截始终读取一致的内存缓存。
+
+---
+
+### 3. 确定性文件流水账回滚系统 (Journal-based Undo)
+用户点击顶栏“↩ 撤销上一步”时，执行确定性的本地事务回退逻辑：
+* **无模型介入**：不向大模型发起任何请求，规避 LLM 对回滚逻辑的幻觉和执行偏差；
+* **并发互斥控制**：后端使用 `asyncio.Lock()` 施加全局事务锁，撤回执行期间前端自动置灰输入与控制台；
+* **全要素逆向反转**：
+  * **移动**：将目标资产移回源路径，若源存在降级则自动恢复原显式安全等级；
+  * **覆盖写**：从备份快照中将原文件原样恢复并更新检索索引；
+  * **重命名**：反向改回原名称，级联更新倒排索引与向量记录；
+  * **解压与打包**：物理清理释放的文件树或删除生成的压缩包；
+  * **安全等级调整**：将资产等级回滚至操作前的显式设定；
+* **生命周期隔离**：服务重启时自动清空操作流水栈（`operation_journal`），杜绝跨会话误撤回历史文件。
+
+---
+
+### 4. 物理操作前置防御引擎 (Pre-check Engine)
+在任何涉及物理写入或变动动作前，系统在 `core/security.py` 中执行前置阻断检测：
+* **磁盘空间预检**：所在分区可用空间不足 500MB，或预计写入后剩余空间低于安全线时直接熔断；
+* **Zip Slip 路径穿越防御**：解压时检测条目是否包含 `../` 或脱离目标沙箱边界的绝对路径，检测到即刻阻断；
+* **Zip 炸弹防御**：解压包解压膨胀比 > 100:1、总释放体积 > 2GB 或包含文件数 > 10,000 时拒绝解压；
+* **符号链接越界检查**：拒绝直接对指向沙箱外部的软链接实施物理穿透操作；
+* **同名冲突严格分流**：
+  * **更换名称**：常规操作，允许用户重命名后**免密放行**；
+  * **覆盖替换**：定级为破坏性高危动作，**强制验证主管理密码**，并在 `.local_agent_undo_backups` 产生原子备份。
+
+---
+
+### 5. 轻量级全离线混合检索 (Dense + Sparse Hybrid Search via RRF)
+系统在不需要部署外部独立向量数据库进程的前提下，实现本地低资源高性能检索：
+* **稠密向量召回 (Dense Retrieval)**：基于 `LanceDB + FastEmbed (BAAI/bge-small-zh-v1.5)`，纯 CPU 运行输出语义特征向量；
+* **稀疏全文倒排召回 (Sparse Retrieval)**：基于 SQLite3 FTS5 引擎配合 `Jieba` 分词器建立全文倒排表；
+* **精确文件特征过滤**：匹配文件路径与名称词干；
+* **RRF (Reciprocal Rank Fusion) 倒数排名融合**：
+  $$RRF\_Score(d) = \sum_{m \in M} \frac{w_m}{k + r_m(d)}$$
+  综合语义、关键字与精确匹配结果，输出兼顾模糊语义与精确路径的检索排序。
+
+---
+
+### 6. 实测性能基准与压缩效果指标 (Benchmarks & Metrics)
+
+在标准开发机器环境（Apple M2 / 16GB RAM，测试包含 12,400+ 个代码与数据文件的实际项目目录）下的实测运行指标如下：
+
+| 评估维度 | 测试基准参数 | 实测性能与压缩比 | 业务效果与工程价值 |
+| :--- | :--- | :--- | :--- |
+| **全景目录树折叠** | 原始未压缩树：~185,000 Tokens | 压缩后地图：**~4,200 Tokens (减重 97.7%)** | 将上万文件的目录树安全载入各类模型单轮上下文窗口。 |
+| **模式诱导解析开销** | 遍历并聚类 12,400+ 文件实体 | **纯 CPU 内存计算 < 65ms** | 毫秒级生成 Markdown 地图，无明显流式等待停顿。 |
+| **RRF 混合检索端到端** | LanceDB 语义 + SQLite FTS5 倒排 | **总召回延迟 < 35ms** | 纯本地 CPU 推理，兼顾自然语言意图与代码精确符号定位。 |
+| **原子撤销物理反转** | 包含 200 项文件的跨目录移动撤回 | **事务反转耗时 < 120ms** | 物理剪切复原与 SQLite 索引级联更新同步完成。 |
+
+---
+
+## 15 项受控工具强类型契约矩阵
+
+所有工具均通过 Pydantic 严格约束参数，统一切入 `_check_security` 拦截网关：
+
+| 工具名称 (`Tool Name`) | 参数模式 (`Schema`) | 基础风险定级 | 动态安全机制与冲突策略 |
+| :--- | :--- | :---: | :--- |
+| **`scan_directory`** | `EmptyInput` | 🟢 `SAFE` | 分层时间切片（80/10/10）物理遍历，聚类压缩后旁路挂载至临时资料库。 |
+| **`search_files`** | `query`, `ext`, `parent_path`, `min_size_mb`, `max_size_mb`, `limit` | 🟢 `SAFE` | RRF 融合检索（向量 + FTS5 全文倒排 + 名称匹配），支持多维度属性过滤。 |
+| **`read_file_content`** | `file_path`, `file_id`, `section` | 🟢 `SAFE` | 30KB/500行限额保护；**受资产等级保护：读 2 级弹窗确认，读 3 级机密强验主密码**。 |
+| **`delete_file`** | `files` | 🔴 `DESTRUCTIVE` | 破坏性高危动作；移入系统回收站；明确提示不可通过撤销按钮自动还原。 |
+| **`move_file`** | `files`, `target_dir`, `rename_to`, `overwrite` | 🟡 `SENSITIVE` | 批量剪切；**原地移动自愈反馈**；**跨目录降级全员抹标**；**同名冲突免密换名 vs 密码覆盖**。 |
+| **`copy_file`** | `files`, `target_dir`, `rename_to`, `overwrite` | 🟢 `SAFE` | 副本复制；源文件受 2/3 级保护时弹窗拦截；同名冲突免密换名 vs 密码覆盖。 |
+| **`create_directory`** | `dir_path` | 🟢 `SAFE` | 在沙箱内新建目录；已存在同名目录时阻断报错；支持撤销删除。 |
+| **`write_file`** | `file_path`, `content`, `overwrite_name` | 🟡 `SENSITIVE` | 创建或写入文本文件；单次 5MB 限制；同名冲突免密换名 vs 密码覆盖。 |
+| **`compress_files`** | `files`, `output_zip`, `rename_to` | 🟢 `SAFE` | 制作 ZIP 包；空间预检；同名压缩包存在时拦截提示换名；支持撤销删除。 |
+| **`extract_archive`** | `zip_path`, `target_dir`, `overwrite` | 🟡 `SENSITIVE` | 安全解压；**强制 Zip Slip 路径穿越防御、压缩炸弹预检与冲突分流**。 |
+| **`find_duplicate_files`**| `EmptyInput` | 🟢 `SAFE` | 基于 SHA-256 哈希比对工作区完全一致的冗余文件。 |
+| **`get_storage_insights`** | `EmptyInput` | 🟢 `SAFE` | 生成磁盘存储透视体检报告，输出后缀分布与 Top10 大文件。 |
+| **`rename_file`** | `file_path`, `file_id`, `new_name` | 🟡 `SENSITIVE` | **重命名文件或目录（智能路径解析、未入库即时建索）**；冲突前置拦截换名；支持撤销还原。 |
+| **`set_security_level`** | `file_path`, `file_id`, `target_level` | 🟡 `SENSITIVE` | **调整资产安全等级（1/2/3）**；**升至 3 级验密；降级触发严重警报；目录设级清理子项**；支持撤销。 |
+| **`locate_or_open_file`**| `file_id`, `file_path`, `action` | 🟢 `SAFE` | 在系统资源管理器中高亮定位，或直接调用系统关联软件打开文件。 |
+
+---
+
+## 系统架构与时序交互图
 
 ```text
-[AI / 用户发起 set_security_level] ──► _async_security_intercept
-                                              │
-                   ┌──────────────────────────┴──────────────────────────┐
-                   ▼                                                     ▼
-           [目标为 3 级 或 发生降级]                                [设置为 2 级]
-                   │                                                     │
-                   ▼                                                     ▼
-        强制验证主管理密码 / 降级警报                                  弹出确认窗口
-                   │                                                     │
-                   └──────────────────────────┬──────────────────────────┘
-                                              ▼
-                             AssetSecurityManager (原子写灾备 JSON)
-                                              ▼
-                             SQLite files.security_level 级联同步
-                                              ▼
-                             写入 operation_journal (支持原子撤回)
+[ 用户 / Web 前端 (Vue 3 + SSE) ]
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   FastAPI 服务与调度中心                     │
+│  - SSE 事件流分发 (thought / text_delta / tool / hitl)       │
+│  - 主密码 PBKDF2 鉴权与 API 凭证对称混淆解密                  │
+│  - 原生原子事务锁 (asyncio.Lock -> Journal Undo)            │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│             LangGraph 异步智能体图状态机                    │
+│   [Agent Node]  <───>  [SafeAsyncToolBatchNode (断路器)]    │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 切面安全网关 (Security Interceptor)         │
+│  - 三级资产有效等级动态计算 (Max(自身显式, 祖先父级最高))      │
+│  - 跨目录降级风险预检与同名冲突扫描                           │
+│  - 物理前检：Zip Slip / 压缩炸弹 / 磁盘余量 / 软链接         │
+│  - HITL 异步协程挂起 (asyncio.Event -> 等待用户授权)         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+        ┌──────────────┴──────────────┐
+        ▼                             ▼
+┌──────────────────────────┐  ┌────────────────────────────────┐
+│   双存储引擎 (Storage)   │  │   物理文件系统 (Filesystem)    │
+│ - SQLite WAL (资产/流水)  │  │ - 沙箱路径约束 (Sandbox Root)  │
+│ - SQLite FTS5 (全文倒排) │  │ - 原地移动与自愈反馈           │
+│ - LanceDB (向量索引)     │  │ - 覆盖备份快照 (.undo_backups) │
+│ - 灾备 JSON (安全等级清单)│  │ - 系统回收站防护 (send2trash)  │
+└──────────────────────────┘  └────────────────────────────────┘
 ```
-
-### 2. AI 智能自愈重命名机制 (文件/目录双轨适配)
-重写后的 `rename_file` 彻底解决了模型因为没有 `file_id` 导致的执行瘫痪：
-1. **参数自适应解析**：参数支持 `file_path` 与 `file_id` 双轨输入。AI 直接传路径即可；
-2. **未索引资产即时建索自愈**：若物理存在但库中暂无主键，自动先执行 `index_single_asset_or_tree` 登记入库生成 ID；
-3. **同名冲突前置拦截**：在物理变动前预检同名冲突，主动挂起弹出更名窗口，杜绝物理覆盖；
-4. **全套索引级联刷新**：物理重命名后，自动级联更新 SQLite 数据库、FTS5 倒排索引、LanceDB 向量库以及安全等级灾备映射。
-
-### 3. 跨目录移动“全员降级”真实生效机制
-* **降级探测**：源资产的生效级别高于目标目录的继承级别时触发；
-* **弹窗警报**：严重警告“移出后该资产及内部所有文件都会降级”，原为 3 级需验证主密码；
-* **物理抹标与数据库同步**：底层执行 `handle_transfer_security_levels(..., is_downgrade=True)`，彻底从灾备清单清除显式标记，并同步更新 SQLite 数据库；
-* **撤销自愈**：撤销移动时，逆向移回源路径的同时自动将被抹除的原高级别显式恢复。
-
-### 4. 原地移动自愈反馈 (根治模型试错重试)
-当 Agent 发起原地移动（`src_path == dest_path`）时，底层不再静默 `continue` 返回空结果，而是主动向 Agent 返回：
-```python
-"资产已在目标目录下（路径未改变），无需物理剪切（原地保持成功）"
-```
-模型接收到确切解答后自然收敛，彻底根除死循环重试。
-
-### 5. 5 维危险操作物理预检引擎 (Pre-check Engine)
-在物理资产执行任何变更动作前强制执行：
-1. **磁盘空间预检 (`precheck_disk_space`)**：剩余空间 < 500MB 或 预计写入体积 > 可用容量 90% 时直接熔断；
-2. **Zip Slip 路径穿越检查**：解压条目规范路径脱离目标沙箱根目录时抛出致命异常阻断；
-3. **压缩炸弹检查 (`precheck_zip_bomb`)**：解压体积 > 2GB、膨胀比 > 100:1 或文件数 > 10,000 时直接拒绝解压；
-4. **符号链接攻击检查 (`check_symlink_safety`)**：拒绝直接对符号链接进行物理操作；
-5. **覆盖冲突检测 (`detect_transfer_conflicts`)**：目标路径已存在同名资产时触发前置挂起拦截。
-
-### 6. 覆盖与命名冲突严格阻断：免密更名 vs 高危密码覆盖
-系统将“同名冲突”处理彻底前置到安全拦截层：
-1. **全工具前置冲突扫描**：移动、复制、写文件、解压与重命名在触碰磁盘前，若目标路径已存在同名资产，底层直接挂起并推送 `hitl_suspend`（携带 `is_conflict: true`）；
-2. **免密更换名称（安全操作）**：用户输入新名称，点击【更名并继续】，系统直接免密放行；
-3. **确认覆盖原有文件（高危操作）**：用户执意覆盖，系统判定为破坏性操作（`DESTRUCTIVE`），**强制要求输入主管理密码**；覆盖前在 `.local_agent_undo_backups` 产生安全快照。
-
-### 7. 脱离 Agent 的原生原子撤销与生命周期隔离 (Undo Stack)
-用户点击顶栏“↩ 撤销上一步”时，执行纯本地事务回退：
-* **无模型介入**：不经过 LLM 与 LangGraph，直接读取 `operation_journal` 流水；
-* **覆盖备份自愈**：将被覆盖的原文件从备份目录原样无损还原；
-* **多操作反转支持**：剪切移回、复制清理、重命名改回原名、解压删除、打包移除、安全等级回退；
-* **生命周期隔离**：服务启动自动清理旧流水栈，避免跨会话误撤回；
-* **按钮动态置灰**：通过 `canUndo` 探针实时反馈状态，无记录时禁用按钮；撤回期间全局互斥锁锁定界面。
-
-### 8. 全生命周期操作审计日志 (Operation Audit Logs)
-* **独立合规表**：在 SQLite 中独立开辟 `audit_logs` 表长期留存；
-* **全要素审计**：字段涵盖 `id`、`timestamp`、`formatted_time`、`operator`、`action_name`、`level`、`target_paths`、`status`、`details`；
-* **查看看板**：用户点击顶栏【📋 审计日志】即可呼出全屏表格面板实时查阅。
 
 ---
 
-## 15 大强类型工具契约矩阵
+## 已知工程边界与设计权衡 (Known Limitations & Trade-offs)
 
-全量 15 个工具均接入 Pydantic Schema 约束与 `_check_security` 统一切面，由 `security_policy.json` 统一管控：
+在系统设计与技术选型过程中，基于单机轻量化与运行可靠性进行了以下工程权衡：
 
-| 工具标识 (`name`) | 参数模式 (`args_schema`) | 默认等级 | 动态冲突策略与核心安全机制 |
-| :--- | :--- | :---: | :--- |
-| **`scan_directory`** | `EmptyInput` | 🟢 `SAFE` | 物理遍历磁盘目录并构建压缩树。旁路挂载至侧边栏临时资料库，增量同步数据库与向量。 |
-| **`search_files`** | `SearchFilesInput`<br>• `query`: Optional[str]<br>• `ext`: Optional[str]<br>• `parent_path`: Optional[str]<br>• `min_size_mb`: Optional[float]<br>• `max_size_mb`: Optional[float]<br>• `limit`: Optional[int] | 🟢 `SAFE` | RRF 融合算法（向量语义 + FTS5 全文倒排 + 文件名精确匹配）。支持空 query 属性过滤。 |
-| **`read_file_content`** | `ReadFileContentInput`<br>• `file_path`: Optional[str]<br>• `file_id`: Optional[int]<br>• `section`: Optional[str] | 🟢 `SAFE` | 30KB/500 行硬预算保护，支持分段采样。**受资产安全保护：读 2 级弹窗确认，读 3 级机密强制验密码**。 |
-| **`delete_file`** | `DeleteFileInput`<br>• `files`: List[str] | 🔴 `DESTRUCTIVE` | **破坏性操作**：强制主密码鉴权；移入系统回收站；**明确提示无法自动撤回，需去系统回收站手动拾回**。 |
-| **`move_file`** | `MoveFileInput`<br>• `files`: List[str]<br>• `target_dir`: str<br>• `rename_to`: Optional[str]<br>• `overwrite`: Optional[bool] | 🟡 `SENSITIVE` | 批量剪切；**原地移动自愈反馈**；**跨目录降级全员抹标与数据库同步**；**同名冲突免密换名 vs 密码覆盖**。 |
-| **`copy_file`** | `CopyFileInput`<br>• `files`: List[str]<br>• `target_dir`: str<br>• `rename_to`: Optional[str]<br>• `overwrite`: Optional[bool] | 🟢 `SAFE` | 批量复制副本；**受资产安全保护：复制 2/3 级资产弹窗拦截**；**同名冲突免密换名 vs 密码覆盖**。 |
-| **`create_directory`** | `CreateDirectoryInput`<br>• `dir_path`: str | 🟢 `SAFE` | 在沙箱内新建目录文件夹；**已存在同名目录时拦截报错**；记录可撤销流水（空目录可撤回删除）。 |
-| **`write_file`** | `WriteFileInput`<br>• `file_path`: str<br>• `content`: Optional[str]<br>• `overwrite_name`: Optional[str] | 🟡 `SENSITIVE` | 新建或写入文本文件；**单次 5MB 文本限额保护**；**同名冲突免密换名 vs 密码覆盖**。 |
-| **`compress_files`** | `CompressFilesInput`<br>• `files`: List[str]<br>• `output_zip`: str<br>• `rename_to`: Optional[str] | 🟢 `SAFE` | 制作 ZIP 压缩包；磁盘空间预检；**目标 ZIP 存在时拦截换名**；支持撤销删除压缩包。 |
-| **`extract_archive`** | `ExtractArchiveInput`<br>• `zip_path`: str<br>• `target_dir`: Optional[str]<br>• `overwrite`: Optional[bool] | 🟡 `SENSITIVE` | 安全解压 ZIP 包；**强制 Zip Slip 防御、压缩炸弹预检与冲突拦截：换名免密，覆盖需主密码**。 |
-| **`find_duplicate_files`**| `EmptyInput` | 🟢 `SAFE` | 基于 SHA-256 哈希排查当前工作区已被索引的重复内容文件。 |
-| **`get_storage_insights`** | `EmptyInput` | 🟢 `SAFE` | 生成存储空间透视体检报告，输出后缀占用分布与 Top10 巨石文件。 |
-| **`rename_file`** | `RenameFileInput`<br>• `new_name`: str<br>• `file_path`: Optional[str]<br>• `file_id`: Optional[Union[int, str]] | 🟡 `SENSITIVE` | **AI 重命名文件/文件夹（支持路径与 ID 智能自愈解析、未入库即时入库）**；**同名冲突前置弹窗拦截换名**；支持撤销还原原名。 |
-| **`set_security_level`** | `SetSecurityLevelInput`<br>• `target_level`: int (1/2/3)<br>• `file_path`: Optional[str]<br>• `file_id`: Optional[Union[int, str]] | 🟡 `SENSITIVE` | **AI 调整资产安全等级**；**升至 3 级强验主密码；降级操作触发降级警报且原为 3 级强验主密码**；目录设级自动清理子项；支持撤销回滚。 |
-| **`locate_or_open_file`**| `LocateOrOpenFileInput`<br>• `file_id`: Optional[int]<br>• `file_path`: Optional[str]<br>• `action`: str ('locate'/'open') | 🟢 `SAFE` | 在系统资源管理器中高亮定位选中文件，或直接调用系统关联程序打开文件。 |
+1. **单机端侧定位 vs 分布式锁**：
+   * 本系统聚焦于**本地开发者个人单工作区**场景。文件事务日志与 `global_undo_lock` 依赖单进程内存锁与 SQLite 本地 WAL 实现，未引入 Redis 或 Etcd 等外部分布式锁组件；
+2. **嵌入式推理初始化开销**：
+   * 为确保完全离线可用并降低资源占用，向量模块选型纯 CPU 推理的 `FastEmbed (BAAI/bge-small-zh-v1.5)`。服务冷启动初次执行向量嵌入时，存在约 1.5 ~ 2.5 秒的 ONNX 模型加载与探测耗时，模型装载完毕后进入常驻毫秒级推理；
+3. **回收站隔离与撤销设计边界**：
+   * 破坏性删除（`delete_file`）直接借助操作系统底层能力（`send2trash` / Windows Shell API / macOS AppleScript）投递至回收站。为防止误删操作在流水撤回时引发级联覆盖冲突，**系统显式禁止撤销栈自动反向捞回已入回收站的资产**，需由用户在操作系统原生回收站中按需手工还原；
+4. **长文本分块截断预算**：
+   * 针对超大文件读取（`read_file_content`），系统实施单次 30KB / 500 行硬顶分段保护，防止极大文件读取引发上下文即刻溢出。大文件深度分析依赖切片（head/middle/tail）按需提取。
 
 ---
 
@@ -289,16 +367,16 @@ pip install fastapi uvicorn pydantic \
     langgraph langchain-core langchain-openai langchain-anthropic langchain-google-genai \
     lancedb pyarrow fastembed jieba tiktoken send2trash requests
 ```
-*(可选增强：安装 `python-docx`、`pypdf`、`pillow` 可自动激活 Word 正文、PDF 文档与图片 EXIF 元数据的深度解析)*
+*(可选支持：安装 `python-docx`、`pypdf`、`pillow` 可自动激活 Word、PDF 文档与图片 EXIF 元数据的深层解析与检索能力)*
 
-### 2. 配置文件说明
-项目首次运行若检测到配置文件缺失，系统将自动自愈创建标准模板：
-* `config/security_policy.json`：配置各工具风险基线、别名映射与单工具豁免清单；
-* `config/config.json`：配置授权工作区物理根路径（`target_path`）、扫描深度、黑名单与管理密码哈希；
-* `data/asset_security_levels.json`：非 1 级资产标记清单（系统自动维护与灾备自愈）。
+### 2. 配置说明
+初次运行系统若检测到配置文件缺失，将自动自愈创建标准模板：
+* `config/config.json`：配置授权工作区物理根路径（`target_path`）、扫描深度、黑名单与管理密码散列；
+* `config/security_policy.json`：声明式安全策略配置（基准风险定级、动作别名与单工具豁免清单）；
+* `data/asset_security_levels.json`：非 1 级资产的显式标记灾备清单（冷启动自愈基准）。
 
 ### 3. 一键启动
-执行总启动入口脚本：
+执行启动入口脚本：
 ```bash
 python run_web.py
 ```
@@ -312,7 +390,7 @@ python run_web.py
 
 - **后端运行时**: Python 3.9+
 - **服务网关与通信**: **FastAPI**, **Uvicorn**, **Server-Sent Events (SSE)**
-- **并发控制与安全锁**: `asyncio.Lock()` (全局撤销互斥), `threading.Event`, `asyncio.Event`
+- **并发控制与安全锁**: `asyncio.Lock()` (全局撤销事务互斥), `threading.Event`, `asyncio.Event` (HITL 异步挂起)
 - **Agent 编排框架**: **LangGraph (>= 0.2.0)**, **LangChain Core (>= 0.3.0)**
 - **模型生态适配**: `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`
 - **数据契约校验**: **Pydantic v2**
@@ -320,8 +398,8 @@ python run_web.py
 - **嵌入式向量数据库**: **LanceDB (Apache Arrow 数据底座)**
 - **向量推理引擎**: **FastEmbed** (`BAAI/bge-small-zh-v1.5`, 纯 CPU 轻量嵌入)
 - **物理磁盘操作与预检**: Python `zipfile`, `shutil`, `send2trash`, `unicodedata`
-- **分词与 Token 计算**: `tiktoken` (cl100k_base), `jieba` (中文分词), Gemini 拟合算法
-- **安全加固与加密**: `hashlib` (PBKDF2-HMAC-SHA256), `secrets`, 机器设备指纹对称混淆
-- **安全等级管理**: **AssetSecurityManager (Singleton & Hot-Reload)**
+- **分词与 Token 计算**: `tiktoken` (cl100k_base), `jieba` (中文全文分词), Gemini 拟合算法
+- **密码学与安全加固**: `hashlib` (PBKDF2-HMAC-SHA256 加盐散列), `secrets`, 机器指纹对称混淆
+- **资产安全管理**: **AssetSecurityManager (Singleton & Hot-Reload)**
 - **安全策略分发**: **Declarative JSON Policy Engine** (`security_policy.json`)
-- **前端表现层**: 原生 HTML5, **Vue 3 (Composition API)**, **TailwindCSS**, Lucide Icons, Markdown-it, Highlight.js (**完全无需 Node.js 或 npm 打包构建**)
+- **前端表现层**: 原生 HTML5, **Vue 3 (Composition API, CDN)**, **TailwindCSS (CDN)**, Lucide Icons, Markdown-it, Highlight.js (**完全无需 Node.js、npm 或打包构建工具**)
