@@ -22,18 +22,22 @@ CONFIG_DIR = os.path.join(AGENT_ROOT, "config")             # Agent/config
 API_CONFIG_FILE = os.path.join(CONFIG_DIR, "API_config.json")
 APP_CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
-if CORE_DIR not in sys.path:
-    sys.path.insert(0, CORE_DIR)
-
+# 【BUG-01 修复】不再在 import 期向 sys.path 注入 Agent/ 或 core/（避免全局导入状态被库代码污染、
+# 以及同一份 core/tokenizer.py 被同时加载为 `tokenizer` 与 `core.tokenizer` 两个模块对象）。
+# 采用包内正规导入；仅在被当作脚本直接执行（此时包根天然不在 sys.path 上）才做一次局部兜底。
 try:
-    from tokenizer import count_text_tokens, format_token_count
+    from core.tokenizer import count_text_tokens, format_token_count
 except ImportError:
-    def count_text_tokens(text: Optional[str], platform: str = "DeepSeek") -> int:
-        if not text:
-            return 0
-        return max(1, len(text) // 3)
-    def format_token_count(count: int) -> str:
-        return f"{count / 1000:.1f}k" if count >= 1000 else str(count)
+    if __name__ == "__main__" and AGENT_ROOT not in sys.path:
+        sys.path.insert(0, AGENT_ROOT)
+        from core.tokenizer import count_text_tokens, format_token_count
+    else:
+        def count_text_tokens(text: Optional[str], platform: str = "DeepSeek") -> int:
+            if not text:
+                return 0
+            return max(1, len(text) // 3)
+        def format_token_count(count: int) -> str:
+            return f"{count / 1000:.1f}k" if count >= 1000 else str(count)
 
 DEFAULT_DATA_SCAN_DIR = os.path.join(AGENT_ROOT, "data", "scan")
 DEFAULT_RAW_SCAN_FILE = os.path.join(DEFAULT_DATA_SCAN_DIR, "scan_result.json")

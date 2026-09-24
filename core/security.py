@@ -52,6 +52,10 @@ class AssetSecurityManager:
         self.backup_file = os.path.join(self.data_dir, "asset_security_levels.json")
         self._levels_cache: Dict[str, int] = {}
         self._last_mtime: float = 0.0
+        # 磁盘一致性签名 (mtime, size, inode)，用于可靠判定"是否需要热重载"
+        self._last_stat_sig: Optional[tuple] = None
+        # 灾备文件是否**成功载入**：未成功时禁止用空缓存覆写它（见 load_backup/save_backup）
+        self._levels_ready: bool = False
         self.load_backup()
         self._initialized = True
 
@@ -68,7 +72,12 @@ class AssetSecurityManager:
         return norm.strip('/')
 
     def to_rel_path(self, abs_or_rel_path: str, target_root: str) -> str:
-        """安全转换为相对于工作区根目录的标准相对路径（Windows大小写自适应）"""
+        """安全转换为相对于工作区根目录的标准相对路径（Windows大小写自适应）
+
+        【P2-2 修复】跨盘符（或任何无法计算相对路径的情形）必须返回空字符串；
+        旧实现会 fallthrough 到 `normalize_rel_path(入参)`，把 `E:/secret/x.txt` 当成本工作区的
+        相对路径返回出去，直接调用方（如 set_asset_level）就可能写下非法灾备键。
+        """
         if not abs_or_rel_path:
             return ""
         norm_root = os.path.normcase(os.path.realpath(os.path.abspath(target_root)))
@@ -77,48 +86,112 @@ class AssetSecurityManager:
         else:
             norm_path = os.path.normcase(os.path.realpath(os.path.abspath(os.path.join(target_root, abs_or_rel_path))))
 
+        # 跨盘符（Windows 下 os.path.relpath 会抛 ValueError）——显式判定为"不在工作区内"
+        if os.path.splitdrive(norm_path)[0] != os.path.splitdrive(norm_root)[0]:
+            return ""
+
         try:
             rel = os.path.relpath(norm_path, norm_root)
             if rel == "." or rel.startswith(".."):
                 return ""
             return self.normalize_rel_path(rel)
         except Exception:
-            return self.normalize_rel_path(abs_or_rel_path)
+            return ""
 
     def _check_and_reload(self):
-        """磁盘文件变动热感知：若 mtime 发生变化，自动热重载"""
-        if not os.path.exists(self.backup_file):
-            return
+        """磁盘文件变动热感知：若磁盘状态与内存缓存不一致，自动热重载。
+
+        【D6 修复】旧实现只判断 `mtime > self._last_mtime`，存在两个静默失效窗口：
+        1. **灾备文件被删除后又被重建**（例如用一份较旧的备份覆盖、或清理脚本重建），
+           新文件 mtime 可能**小于**内存里记录的旧 mtime。此时条件不成立，
+           新写入的等级标记会被永久忽略，且 `_last_mtime` 再也不会更新
+           （文件不存在时该函数直接 return，连基线都不刷新）。
+        2. 同秒内快速改写（部分文件系统 mtime 精度为 1 秒）导致 mtime 相等。
+
+        现改为用 (mtime, size, inode) 三元组做一致性比对：任一变化即重载；
+        文件不存在时重置基线，使"删除再重建"能正确触发重载。
+        """
         try:
-            mtime = os.path.getmtime(self.backup_file)
-            if mtime > self._last_mtime:
+            if not os.path.exists(self.backup_file):
+                # 文件消失：重置基线并清空缓存，避免继续沿用已不存在的磁盘状态
+                if self._last_mtime != 0.0 or self._levels_cache:
+                    self._last_mtime = 0.0
+                    self._last_stat_sig = None
+                    self._levels_cache = {}
+                return
+
+            st = os.stat(self.backup_file)
+            sig = (st.st_mtime, st.st_size, getattr(st, "st_ino", 0))
+            if sig != getattr(self, "_last_stat_sig", None):
                 self.load_backup()
         except Exception:
             pass
 
     def load_backup(self) -> Dict[str, int]:
-        """从 data/asset_security_levels.json 加载非 1 级资产标记名单"""
+        """从 data/asset_security_levels.json 加载非 1 级资产标记名单。
+
+        【灾备防覆写】解析失败时**必须**把缓存与"已就绪"状态一起保持为
+        "不可用"，否则下一次 save_backup 会用空缓存去原子覆写灾备文件，
+        把全部 2/3 级标记永久抹掉（这份文件没有版本控制兜底，
+        历史上已经真实丢过一次）。
+        """
+        was_ready = getattr(self, "_levels_ready", False)
+
         if os.path.exists(self.backup_file):
             try:
-                self._last_mtime = os.path.getmtime(self.backup_file)
                 with open(self.backup_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    raw_levels = data.get("levels", {})
-                    self._levels_cache = {
-                        self.normalize_rel_path(k): int(v)
-                        for k, v in raw_levels.items()
-                        if int(v) in (self.LEVEL_SENSITIVE, self.LEVEL_CRITICAL) and self.normalize_rel_path(k)
-                    }
-                    return self._levels_cache
+                raw_levels = data.get("levels", {})
+                self._levels_cache = {
+                    self.normalize_rel_path(k): int(v)
+                    for k, v in raw_levels.items()
+                    if int(v) in (self.LEVEL_SENSITIVE, self.LEVEL_CRITICAL) and self.normalize_rel_path(k)
+                }
+                # 【关键顺序】只有**解析成功**之后才登记"磁盘签名"，
+                # 否则签名与磁盘一致会让热重载判定"无需重载"，坏文件被永久沿用。
+                try:
+                    st = os.stat(self.backup_file)
+                    self._last_mtime = st.st_mtime
+                    self._last_stat_sig = (st.st_mtime, st.st_size, getattr(st, "st_ino", 0))
+                except OSError:
+                    self._last_stat_sig = None
+                self._levels_ready = True
+                return self._levels_cache
             except Exception as e:
-                print(f"[-] 读取资产安全等级备份失败: {e}，将初始化空配置", flush=True)
+                print(f"[-] 读取资产安全等级备份失败: {e}；"
+                      f"为避免覆盖现有等级，本次不载入空缓存（写入将被拒绝）", flush=True)
+                # 解析失败：不写签名（以便磁盘文件被修好后能自动重载），
+                # 并且**不把 _levels_ready 置真**，从而禁止用空缓存覆写文件。
+                self._last_stat_sig = None
+                self._levels_ready = False
+                if not was_ready:
+                    self._levels_cache = {}
+                return self._levels_cache
 
+        # 文件不存在：这是正常状态（尚无任何 2/3 级标记），允许写入
         self._levels_cache = {}
+        self._last_stat_sig = None
+        self._last_mtime = 0.0
+        self._levels_ready = True
         return self._levels_cache
 
-    def save_backup(self) -> bool:
-        """原子持久化非 1 级资产标记名单至 data/ 目录"""
+    def save_backup(self, allow_empty: bool = False) -> bool:
+        """原子持久化非 1 级资产标记名单至 data/ 目录。
+
+        【灾备防覆写】若灾备文件存在、但本次载入并未成功（解析失败），
+        则**拒绝写入**——否则一次"用空缓存落盘"就会抹掉全部标记。
+        清空整个清单必须是显式意图（调用方传 allow_empty=True）。
+        """
+        if (not allow_empty
+                and not getattr(self, "_levels_ready", False)
+                and os.path.exists(self.backup_file)):
+            print("[-] 灾备清单未成功载入，已拒绝对其写入（避免抹掉现有安全等级）。"
+                  "请修复 data/asset_security_levels.json 后重试。", flush=True)
+            return False
+
         try:
+            # 【轮转备份】每次落盘前留一份上一版，避免单点故障
+            self._rotate_backup()
             payload = {
                 "version": "1.0.0",
                 "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -128,11 +201,22 @@ class AssetSecurityManager:
             with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             shutil.move(temp_path, self.backup_file)
-            self._last_mtime = os.path.getmtime(self.backup_file)
+            st = os.stat(self.backup_file)
+            self._last_mtime = st.st_mtime
+            self._last_stat_sig = (st.st_mtime, st.st_size, getattr(st, "st_ino", 0))
+            self._levels_ready = True
             return True
         except Exception as e:
             print(f"[-] 原子持久化资产安全等级备份异常: {e}", flush=True)
             return False
+
+    def _rotate_backup(self) -> None:
+        """落盘前把当前文件留一份 .bak（保留最近一版），失败不影响主流程。"""
+        try:
+            if os.path.exists(self.backup_file):
+                shutil.copy2(self.backup_file, self.backup_file + ".bak")
+        except Exception as e:
+            print(f"[-] 灾备清单轮转备份失败（不影响本次写入）: {e}", flush=True)
 
     def get_explicit_level(self, rel_path: str) -> int:
         """获取资产自身显式设定的安全等级（大小写不敏感匹配，未设则为 1 级）"""
@@ -151,6 +235,38 @@ class AssetSecurityManager:
             if k.lower() == clean_rel_lower:
                 return v
         return self.LEVEL_DEFAULT
+
+    def restore_levels(self, levels: Dict[str, int]) -> bool:
+        """把一批**显式等级标记**整体还原进缓存并原子落盘（供失败回滚使用）。
+
+        【D4 补完】为什么不能用 `set_asset_level` 逐个还原：
+        `set_asset_level(目录, 2/3, is_dir=True)` 按业务规则会**清掉该目录下所有子项的
+        显式标记**（改由父目录继承）。而失败回滚要还原的恰恰是"被子项清理规则删掉的
+        那些子项标记"，若逐个走 `set_asset_level`，还原父目录时会再清一遍子项，
+        自相矛盾。
+
+        本方法只做一件事：把给定的 相对路径→等级 合并进 `_levels_cache` 并落盘，
+        不触发任何级联清理。调用方负责保证传入的是**该操作开始时完整快照**。
+
+        :param levels: {相对路径: 2 或 3}，1 级/其它值会被忽略（与"标记"语义一致）
+        :return: 落盘是否成功
+        """
+        restored = 0
+        for rel, lvl in (levels or {}).items():
+            try:
+                level = int(lvl)
+            except (TypeError, ValueError):
+                continue
+            if level not in (self.LEVEL_SENSITIVE, self.LEVEL_CRITICAL):
+                continue
+            clean = self.normalize_rel_path(str(rel))
+            if not clean:
+                continue
+            self._levels_cache[clean] = level
+            restored += 1
+        if not restored:
+            return True
+        return self.save_backup()
 
     def get_effective_level(self, abs_or_rel_path: str, target_root: str) -> int:
         """
@@ -261,9 +377,9 @@ class AssetSecurityManager:
             for k in keys_to_clean:
                 del self._levels_cache[k]
                 changed = True
-            if changed:
-                self.save_backup()
-            return {"action": "downgraded", "cleaned_keys": keys_to_clean}
+            # 【D5 修复】回传落盘结果，调用方才能判断灾备是否真的写成功
+            persisted = self.save_backup() if changed else True
+            return {"action": "downgraded", "cleaned_keys": keys_to_clean, "persisted": persisted}
         else:
             # 正常迁移映射
             matched_key = None
@@ -286,13 +402,24 @@ class AssetSecurityManager:
                     self._levels_cache[updated_sub] = val
                     changed = True
 
-            if changed:
-                self.save_backup()
-            return {"action": "remapped", "new_rel": new_rel}
+            # 【D5 修复】同上：落盘失败必须让调用方可见
+            persisted = self.save_backup() if changed else True
+            return {"action": "remapped", "new_rel": new_rel, "persisted": persisted}
 
-    def remap_paths_after_transfer(self, old_src: str, new_dest: str, target_root: str, is_dir: bool = False):
-        """兼容旧接口的物理移动重命名转发"""
-        self.handle_transfer_security_levels(old_src, new_dest, target_root, is_dir=is_dir, is_downgrade=False)
+    def remap_paths_after_transfer(self, old_src: str, new_dest: str, target_root: str,
+                                   is_dir: bool = False) -> Dict[str, Any]:
+        """兼容旧接口的物理移动重命名转发。
+
+        【D5 修复】原实现丢弃了 `handle_transfer_security_levels` 的返回值，
+        调用方因此无法得知灾备落盘是否成功。内部的 `save_backup()` 在异常时
+        只 print 并返回 False，属于"静默失败"：
+        重命名后若 JSON 写失败，则旧路径仍保留标记、DB 已是新路径，
+        下次冷启动重建派生等级时会把等级灌到一个**已不存在的路径**上，
+        被重命名资产静默掉级。现原样回传结果供调用方判定与告警。
+        """
+        return self.handle_transfer_security_levels(
+            old_src, new_dest, target_root, is_dir=is_dir, is_downgrade=False
+        )
 
     def get_all_records(self) -> Dict[str, int]:
         """返回全部已标记的相对路径字典"""
@@ -319,7 +446,8 @@ class SecurityManager:
     MAX_ZIP_ENTRY_COUNT = 10000
     MIN_DISK_FREE_BYTES = 500 * 1024 * 1024
 
-    def __init__(self, app_config_ref: dict, save_config_callback=None, policy_path: Optional[str] = None):
+    def __init__(self, app_config_ref: dict, save_config_callback=None,
+                 policy_path: Optional[str] = None, data_dir: Optional[str] = None):
         self.app_config = app_config_ref
         self.save_config_callback = save_config_callback
 
@@ -340,7 +468,15 @@ class SecurityManager:
         else:
             self.policy_path = policy_path
 
-        data_dir = os.path.join(base_dir, "data")
+        # 【可注入性修复】data_dir 此前**写死**为 <项目根>/data。
+        # 后果：隔离测试里夹具把安全等级标记写在**夹具工作区**，
+        # 而这里构造出的 AssetSecurityManager 仍去读**项目本体**的
+        # data/asset_security_levels.json —— 于是网关用真实工程状态做判定，
+        # 夹具标记根本没生效（现象：items_meta 显示源资产 3 级，
+        # 但 evaluate_action_with_assets 返回 max_asset_level=1）。
+        # 生产调用不传该参数，行为与从前完全一致。
+        if data_dir is None:
+            data_dir = os.path.join(base_dir, "data")
         # 始终通过单例工厂获取全局共享的资产安全管理器
         self.asset_sec_mgr = AssetSecurityManager.get_instance(data_dir)
         self.security_policy: Dict[str, Any] = self._load_policy()
@@ -545,6 +681,14 @@ class SecurityManager:
         """
         豁免判定：
         若命中 2 级或 3 级受控资产，硬性禁止任何免提醒/豁免，必须人工交互拦截！
+
+        【安全修复】`is_asset_guarded` 此前只在**签名**里、函数体内从未真正使用，
+        而调用方（网关）又恒定传 `is_asset_guarded=False` —— 于是这道防线形同虚设：
+        策略文件里被标了"工具免检"的动作（如 `rename_file`），
+        即便操作的是 **2 级/3 级受控资产**，也会被直接放行、不弹窗、不要密码。
+        与用户口径（"涉及敏感动作或安全等级必须告警；2 级弹窗、3 级密码"）直接冲突。
+
+        现改为：受控资产一律不免检 —— 先挡在 tool_exemptions / session_skip 之前。
         """
         if is_asset_guarded:
             return False

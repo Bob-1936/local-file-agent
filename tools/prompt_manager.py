@@ -10,6 +10,13 @@ import logging
 from typing import Dict, List, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 
+from core.chat_log_store import (
+    ChatLogStore,
+    DEFAULT_WINDOW_ROUNDS,
+    resolve_size_warn_bytes,
+    resolve_window_rounds,
+)
+
 logger = logging.getLogger("PromptManager")
 
 # tools/prompt_manager.py
@@ -50,14 +57,36 @@ DEFAULT_SYSTEM_PROMPT = """你是一个专业的本地文件管理智能助手�
 class PromptManager:
     """提示词上下文管理内核：负责物理工作区绝对锚定注入、常驻与临时资料库调度及原子事务历史管理。"""
 
-    def __init__(self, system_prompt: str = DEFAULT_SYSTEM_PROMPT, max_history_rounds: int = 10, target_path: str = ""):
+    def __init__(self, system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+                 max_history_rounds: int = DEFAULT_WINDOW_ROUNDS,
+                 target_path: str = "", app_config: Optional[Dict[str, Any]] = None,
+                 log_dir: Optional[str] = None):
         self.system_prompt = system_prompt
-        self.max_history_rounds = max_history_rounds
+        # 窗口轮数：来自配置（可配置），不再是写死的常量
+        self.max_history_rounds = (
+            resolve_window_rounds(app_config) if app_config is not None else max_history_rounds
+        )
         self.target_path = os.path.normpath(os.path.abspath(target_path)) if target_path else self._detect_config_target_path()
         self.chat_history: List[BaseMessage] = []
-        self._history_snapshot: Optional[List[BaseMessage]] = None
+        # 【回滚标记】用"消息对象"而不是下标：即使内存窗口滚动过，也认得出本轮起点
+        self._turn_marker: Optional[BaseMessage] = None
+        self._turn_marker_index: Optional[int] = None
         self.temp_prompts: List[Dict[str, str]] = []
         self.persistent_prompts: List[Dict[str, Any]] = []
+
+        # 【记录落盘】完整记录写本地文件，内存只保留窗口范围内的内容
+        self.chat_store = ChatLogStore(
+            log_dir=log_dir or self._default_log_dir(),
+            size_warn_bytes=resolve_size_warn_bytes(app_config),
+        )
+        self.last_window_dropped = 0
+        self.size_warning: str = ""
+
+    def _default_log_dir(self) -> str:
+        """记录目录：默认 <项目根>/data/chat/（测试可整体覆盖，见 chat_log_store）。"""
+        from core.chat_log_store import default_chat_log_dir
+
+        return default_chat_log_dir()
 
     def _detect_config_target_path(self) -> str:
         try:
@@ -213,19 +242,111 @@ class PromptManager:
         full_text = self.get_full_system_instruction()
         return hashlib.md5(full_text.encode("utf-8")).hexdigest()
 
-    # ==================== 原子事务历史管理 ====================
+    # ==================== 回合事务与记录落盘 ====================
+
+    def _remember(self, messages: List[BaseMessage]):
+        """把消息**同时**写进记录文件与内存。
+
+        文件保存完整内容、永不删减；内存只保留窗口范围内的最近若干轮。
+        窗口滚动只影响内存，**绝不动文件**。
+        """
+        if not messages:
+            return
+        try:
+            self.chat_store.append_messages(list(messages))
+        except Exception as e:
+            # 落盘失败不能影响对话本身；如实记下来即可
+            logger.error(f"对话记录落盘失败: {e}")
+
+        self.chat_history.extend(messages)
+        self._apply_window()
+        self._refresh_size_warning()
+
+    def _apply_window(self):
+        """把内存里的记录裁剪到窗口范围内（只在内存发生）。
+
+        【就地把窗口外的消息从头部移除】不重新赋值整个列表：
+        重新赋值会丢掉列表自身的类型/包装，也会让任何持有引用的观察者失联。
+        """
+        drop = self.chat_store.window_drop_count(self.chat_history, self.max_history_rounds)
+        self.last_window_dropped = drop
+        if drop > 0:
+            del self.chat_history[:drop]
+
+    def reapply_window(self, window_rounds: Optional[int] = None) -> int:
+        """按（可能是新的）窗口轮数**立刻**重裁内存，返回丢弃条数。
+
+        【为什么需要】裁剪此前只在"下一条消息到来时"发生。于是用户在设置里
+        把窗口从 50 调小到 3 之后，内存里已有的那些旧消息会一直留着，
+        界面也就一直显示旧内容——要等到他再发一句话才生效。
+        设置保存时调用本方法，改动即可实时生效。
+        """
+        if window_rounds is not None:
+            self.max_history_rounds = max(1, int(window_rounds))
+        before = len(self.chat_history)
+        self._apply_window()
+        return before - len(self.chat_history)
+
+    def _refresh_size_warning(self):
+        """记录文件超过阈值时**只告警一次**，不做任何其它行为。"""
+        try:
+            if self.chat_store.should_warn_size():
+                mb = self.chat_store.size_bytes() / (1024 * 1024)
+                self.size_warning = (
+                    f"当前对话记录文件已超过 {mb:.1f}MB（阈值 "
+                    f"{self.chat_store.size_warn_bytes / (1024 * 1024):.0f}MB）。"
+                    f"记录不会被删减或压缩；如需控制体积，建议新建对话。"
+                )
+                logger.warning(self.size_warning)
+        except Exception:
+            pass
 
     def begin_turn_transaction(self):
-        self._history_snapshot = copy.deepcopy(self.chat_history)
+        """标记本轮的起点：**本轮用户消息之前**的那条消息。
+
+        只记一个"标记"，**不再整份深拷贝聊天记录**——那会让每轮开始与回滚
+        都要复制一次完整历史，记录越大越慢（这正是收尾会卡住的根源）。
+
+        【标记为什么必须在用户消息之前】
+        回滚的语义是"这一轮从没发生过"，因此要连**本轮的提问**一起丢掉；
+        否则提问会留下来变成一条没有回答的孤儿消息，下一轮模型会看到
+        "我问了但没答"的错误上下文。
+
+        实现上同时记"下标 + 消息对象"：窗口滚动会让下标失效，
+        而下标能覆盖"本轮是历史第一条消息、之前没有任何消息"的情况
+        （此时没有对象可指，只能靠下标）。
+        """
+        self._turn_marker = self.chat_history[-1] if self.chat_history else None
+        self._turn_marker_index = len(self.chat_history)
 
     def rollback_turn_transaction(self):
-        if self._history_snapshot is not None:
-            self.chat_history = copy.deepcopy(self._history_snapshot)
-            self._history_snapshot = None
+        """丢弃本轮产生的消息（从标记处截断）。不动物理记录文件。"""
+        marker = self._turn_marker
+        marker_idx = getattr(self, "_turn_marker_index", None)
+        self._turn_marker = None
+        self._turn_marker_index = None
+
+        if marker is None:
+            # 本轮是历史的第一条消息：整段内存都归本轮所有 → 清空内存。
+            # 文件内容不受影响（完整记录仍在记录文件里）。
+            if marker_idx == 0:
+                self.chat_history.clear()
+            return
+
+        for i, m in enumerate(self.chat_history):
+            if m is marker:
+                # 截断掉标记**之后**的内容（含本轮的提问）
+                del self.chat_history[i + 1:]
+                return
+
+        # 标记已被内存窗口滚出去：说明本轮残留全在内存里，直接清空。
+        # 文件内容不受影响。
+        self.chat_history.clear()
 
     def commit_turn_transaction(self):
-        self._history_snapshot = None
-        self._safe_trim_history()
+        self._turn_marker = None
+        self._apply_window()
+        self._refresh_size_warning()
 
     def add_user_message(self, text: str, img_data: Optional[Dict[str, str]] = None):
         if img_data:
@@ -233,38 +354,86 @@ class PromptManager:
                 {"type": "text", "text": text},
                 {"type": "image_url", "image_url": {"url": f"data:image/{img_data['mime']};base64,{img_data['base64']}"}}
             ]
-            self.chat_history.append(HumanMessage(content=content_block))
+            self._remember([HumanMessage(content=content_block)])
         else:
-            self.chat_history.append(HumanMessage(content=text))
+            self._remember([HumanMessage(content=text)])
 
     def add_assistant_message(self, text: str):
         if text:
-            self.chat_history.append(AIMessage(content=text))
+            self._remember([AIMessage(content=text)])
+
+    def add_generated_messages(self, messages: List[BaseMessage]):
+        """本轮跑完后把模型/工具产生的消息写进记录与内存。"""
+        self._remember(list(messages))
+
+    def load_history_from_disk(self, path: Optional[str] = None):
+        """从记录文件载入窗口视图（只读尾部，不把整个文件读进内存）。
+
+        【每次启动新开一份对话（除非最新那份本来就是空的）】
+        这满足"每次打开就是一次新对话"的直觉，同时避免启动一次就多一个空文件：
+        若最近那份记录一条消息都没有，就直接续用它。
+
+        【必须把解析到的路径写回 chat_store】此前只在显式传 path 时才回写，
+        于是"续接最近一份对话记录"这条分支虽然读到了内容，
+        `chat_store.path` 却仍是空 —— 后续追加会**新建一个文件**，
+        历史被劈成两份、状态接口也报不出文件名。
+        """
+        if path:
+            target = path
+        else:
+            latest = self.chat_store.latest_log()
+            if latest:
+                try:
+                    self.chat_store.path = latest
+                    if self.chat_store.total_messages() == 0:
+                        target = latest          # 最新那份还是空的：直接续用
+                    else:
+                        target = self.chat_store.start_new_log()
+                except Exception:
+                    target = self.chat_store.start_new_log()
+            else:
+                target = self.chat_store.start_new_log()
+
+        self.chat_store.path = target
+        window = self.chat_store.load_window(self.max_history_rounds)
+        self.chat_history = window.messages
+        self.last_window_dropped = window.dropped
+        self._refresh_size_warning()
 
     def clear_history(self):
+        """清空 = 开新对话：新建一份记录文件并清空内存。旧文件原地保留。"""
         self.chat_history.clear()
-        self._history_snapshot = None
+        self._turn_marker = None
+        self.last_window_dropped = 0
+        self.size_warning = ""
+        self.chat_store.start_new_log()
 
-    def _safe_trim_history(self):
-        max_messages = self.max_history_rounds * 4
-        if len(self.chat_history) <= max_messages:
-            return
+    def history_status(self) -> Dict[str, Any]:
+        """给前端的对话记录状态（窗口内条数、未载入内存的条数、文件体积）。
 
-        cut_idx = len(self.chat_history) - max_messages
-        while cut_idx < len(self.chat_history):
-            if isinstance(self.chat_history[cut_idx], HumanMessage):
-                break
-            cut_idx += 1
-
-        if cut_idx >= len(self.chat_history):
-            logger.warning("_safe_trim_history 未找到 HumanMessage 边界，放弃本次截断以保护上下文完整。")
-            return
-
-        self.chat_history = self.chat_history[cut_idx:]
+        ``dropped`` 是**文件总条数 - 内存条数**，即"更早还有多少条没显示"。
+        注意不能直接用最近一次窗口滚动的条数：那一项只反映最后一次裁剪，
+        而界面要的是累计缺口。
+        """
+        total = 0
+        try:
+            total = self.chat_store.total_messages()
+        except Exception:
+            total = len(self.chat_history)
+        return {
+            "log_file": os.path.basename(self.chat_store.path) if self.chat_store.path else "",
+            "in_window": len(self.chat_history),
+            "dropped": max(0, total - len(self.chat_history)),
+            "total_messages": total,
+            "size_bytes": self.chat_store.size_bytes(),
+            "window_rounds": self.max_history_rounds,
+            "warning": self.size_warning,
+        }
 
     def record_undo_event(self, summary: str, affected_items: List[str], can_undo: bool):
+        extra = []
         if self.chat_history and isinstance(self.chat_history[-1], ToolMessage):
-            self.chat_history.append(AIMessage(content="操作执行已被中断或废弃。"))
+            extra.append(AIMessage(content="操作执行已被中断或废弃。"))
 
         items_str = "\n".join([f"  - {it}" for it in affected_items]) if affected_items else "  - 见系统底层详细事务记录"
         undo_notification = (
@@ -276,6 +445,6 @@ class PromptManager:
             f"【注意】：上述被撤销生成的目标文件已从磁盘中抹除，被移走的文件已移回原位，SQLite、安全等级灾备清单与向量库已同步完成注销与修正。后续分析必须以当前回滚后的真实物理状态为准！"
         )
 
-        self.chat_history.append(HumanMessage(content=undo_notification))
-        self.chat_history.append(
-            AIMessage(content=f"已确认感知物理回滚事实：{summary}。本地资产库与上下文索引已同步对齐。"))
+        extra.append(HumanMessage(content=undo_notification))
+        extra.append(AIMessage(content=f"已确认感知物理回滚事实：{summary}。本地资产库与上下文索引已同步对齐。"))
+        self._remember(extra)

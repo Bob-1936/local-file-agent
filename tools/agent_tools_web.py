@@ -71,12 +71,14 @@ class WriteFileInput(BaseModel):
     file_path: str = Field(description="目标文件路径（创建新文本文件或覆盖写入）")
     content: Optional[str] = Field(default="", description="待写入的文本正文内容（单次最大限额 5MB）")
     overwrite_name: Optional[str] = Field(default=None, description="若发生同名冲突，指定的新文件名以完成写入")
+    overwrite: Optional[bool] = Field(default=False, description="目标已存在同名文件时，是否经用户授权后强制覆盖替换原有内容（默认 False）")
 
 
 class CompressFilesInput(BaseModel):
     files: List[str] = Field(description="待打包压缩的文件或文件夹路径列表")
     output_zip: str = Field(description="输出的 ZIP 压缩包路径（必须位于工作区内，如 'backup.zip'）")
     rename_to: Optional[str] = Field(default=None, description="若输出压缩包存在命名冲突，指定的新包名")
+    overwrite: Optional[bool] = Field(default=False, description="输出压缩包已存在时，是否经用户授权后强制覆盖替换（默认 False）")
 
 
 class ExtractArchiveInput(BaseModel):
@@ -322,18 +324,22 @@ def get_agent_tools(
     async def write_file_tool(
             file_path: str,
             content: Optional[str] = "",
-            overwrite_name: Optional[str] = None
+            overwrite_name: Optional[str] = None,
+            overwrite: Optional[bool] = False
     ) -> Union[str, Dict[str, Any]]:
-        """新建或写入文本文件。同名冲突直接拦截询问换名，严禁直接强制覆盖。单次限额 5MB。"""
-        params = {"file_path": file_path, "overwrite_name": overwrite_name}
+        """新建或写入文本文件。同名冲突直接拦截询问换名，经用户授权后可覆盖替换。单次限额 5MB。"""
+        params = {"file_path": file_path, "overwrite_name": overwrite_name, "overwrite": bool(overwrite)}
         passed, reason, final_params = await _check_security("write_file", params)
         if not passed:
             return _build_interrupt_payload(reason=reason, display_message=f"🛑 写入已被安全策略拦截: {reason}")
 
-        eff_ow = final_params.get("overwrite_name", overwrite_name) if isinstance(final_params, dict) else overwrite_name
+        eff_p = final_params if isinstance(final_params, dict) else params
+        eff_ow_name = eff_p.get("overwrite_name", overwrite_name)
+        eff_ow = bool(eff_p.get("overwrite", overwrite))
         res = await asyncio.to_thread(
             file_tool.write_file,
-            file_path=file_path, content=content or "", overwrite_name=eff_ow
+            file_path=file_path, content=content or "",
+            overwrite_name=eff_ow_name, overwrite=eff_ow
         )
         if not isinstance(res, dict):
             return "❌ 写入失败: 底层服务返回了无效结构。"
@@ -345,18 +351,21 @@ def get_agent_tools(
     async def compress_files_tool(
             files: List[str],
             output_zip: str,
-            rename_to: Optional[str] = None
+            rename_to: Optional[str] = None,
+            overwrite: Optional[bool] = False
     ) -> Union[str, Dict[str, Any]]:
-        """将指定的文件或文件夹打包制作成 ZIP 压缩文件。若输出压缩包存在则拦截换名。"""
-        params = {"files": files, "output_zip": output_zip, "rename_to": rename_to}
+        """将指定的文件或文件夹打包制作成 ZIP 压缩文件。若输出压缩包存在则拦截换名，经用户授权后可覆盖替换。"""
+        params = {"files": files, "output_zip": output_zip, "rename_to": rename_to, "overwrite": bool(overwrite)}
         passed, reason, final_params = await _check_security("compress_files", params)
         if not passed:
             return _build_interrupt_payload(reason=reason, display_message=f"🛑 打包已被安全策略拦截: {reason}")
 
-        eff_rn = final_params.get("rename_to", rename_to) if isinstance(final_params, dict) else rename_to
+        eff_p = final_params if isinstance(final_params, dict) else params
+        eff_rn = eff_p.get("rename_to", rename_to)
+        eff_ow = bool(eff_p.get("overwrite", overwrite))
         res = await asyncio.to_thread(
             file_tool.compress_files,
-            files=files, output_zip=output_zip, rename_to=eff_rn
+            files=files, output_zip=output_zip, rename_to=eff_rn, overwrite=eff_ow
         )
         if not isinstance(res, dict):
             return "❌ 压缩失败: 底层服务返回了无效结构。"

@@ -208,6 +208,12 @@
             <i data-lucide="clipboard-list" class="w-3.5 h-3.5 mr-1 text-sky-500"></i>📋 审计日志
           </button>
 
+          <!-- 新对话：新建一份记录文件，旧记录保留（可去审计日志里接续） -->
+          <button @click="clearMessages" title="新建一份对话记录；旧记录会保留，可在「📋 审计日志」里接续或删除"
+                  class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-lg text-xs font-medium flex items-center transition">
+            <i data-lucide="plus-circle" class="w-3.5 h-3.5 mr-1"></i>新对话
+          </button>
+
           <button @click="toggleTheme" class="px-2.5 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-gray-300 dark:hover:bg-dark-600 rounded-lg text-xs font-medium flex items-center transition">
             <span>{{ isDarkMode ? '☀️ 白天' : '🌙 黑夜' }}</span>
           </button>
@@ -224,14 +230,18 @@
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5 mr-1" :class="{'animate-spin': isSyncingDb}"></i>
             {{ isSyncingDb ? '同步中...' : '同步索引' }}
           </button>
-          <button @click="clearMessages" class="px-3 py-1.5 bg-gray-200 dark:bg-dark-700 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-300 rounded-lg text-xs font-medium flex items-center transition">
-            <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i>清空
-          </button>
         </div>
       </header>
 
       <!-- 对话列表展示区 -->
       <div ref="chatContainer" class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+        <!-- 更早的记录没有载入内存：完整内容仍在本地记录文件里，只是不在上下文窗口内 -->
+        <div v-if="historyWindow.dropped > 0"
+             class="flex items-center justify-center">
+          <div class="px-3 py-1.5 rounded-full bg-gray-100 dark:bg-dark-700 text-[11px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-dark-600">
+            更早还有 {{ historyWindow.dropped }} 条记录未显示（本窗口保留最近 {{ historyWindow.window_rounds }} 轮，完整记录已存于本地文件，未删除）
+          </div>
+        </div>
         <div v-for="(msg, idx) in messages" :key="idx" class="flex flex-col space-y-2">
           <!-- 用户消息 -->
           <div v-if="msg.role === 'user'" class="flex items-start justify-end space-x-3">
@@ -333,14 +343,22 @@
           <textarea ref="messageInputRef"
                     v-model="inputMessage"
                     :disabled="isUndoing"
+                    :class="{'opacity-60': isFinalizing}"
                     @keydown.enter.exact.prevent="sendMessage"
-                    :placeholder="isUndoing ? '⏳ 正在执行撤销事务，通道已互斥锁定，请稍候...' : '提问文件、指示 Agent 打包、解压、新建目录或管理资产...'"
+                    :placeholder="isFinalizing ? '⏳ 正在等待上一轮收尾完成，稍后即可发送...' : (isUndoing ? '⏳ 正在执行撤销事务，通道已互斥锁定，请稍候...' : '提问文件、指示 Agent 打包、解压、新建目录或管理资产...')"
                     rows="2"
                     class="flex-1 bg-transparent border-0 focus:ring-0 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 resize-none max-h-32 outline-none disabled:cursor-not-allowed"></textarea>
 
           <div class="flex items-center space-x-2">
             <button v-if="isStreaming" @click="abortCurrentStream" class="p-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition" title="强制中止">
               <i data-lucide="square" class="w-4 h-4"></i>
+            </button>
+            <!-- 收尾中：上一回合尚未确认收尾完成。按钮为加载状态且点不动，
+                 此时消息发不出去（输入框仍可打字） -->
+            <button v-else-if="isFinalizing" disabled
+                    class="p-2 bg-gray-300 dark:bg-dark-700 text-gray-500 dark:text-gray-400 rounded-lg cursor-not-allowed"
+                    title="正在等待上一轮收尾完成，暂不可发送">
+              <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
             </button>
             <button v-else @click="sendMessage" :disabled="(!inputMessage.trim() && !attachedFile) || isUndoing" class="p-2 bg-brand-600 hover:bg-brand-500 disabled:bg-gray-300 dark:disabled:bg-dark-700 disabled:text-gray-400 text-white rounded-lg transition">
               <i data-lucide="send" class="w-4 h-4"></i>
@@ -423,6 +441,19 @@
               🔴 设为 3 级 (受密码保护)
             </button>
           </div>
+        </div>
+
+        <!-- 机密资产改级时的主密码入口（后端对 3 级资产强制验密，前端必须提供输入通道） -->
+        <div v-if="securityPending.need || securityPassword"
+             class="flex items-center space-x-2 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800/80 p-3 rounded-xl">
+          <i data-lucide="lock" class="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0"></i>
+          <span class="text-xs text-rose-800 dark:text-rose-300 whitespace-nowrap">
+            本次操作涉及 <b>3 级（机密）</b> 资产，请输入主管理密码：
+          </span>
+          <input type="password" v-model="securityPassword" placeholder="主管理密码"
+                 @keyup.enter="applyBatchSecurityLevel(securityPending.target_level)"
+                 class="flex-1 max-w-xs bg-white dark:bg-dark-900 border border-rose-300 dark:border-rose-800 rounded px-2 py-1 text-xs outline-none text-gray-800 dark:text-gray-100">
+          <span class="text-[11px] text-rose-500 dark:text-rose-400">输入后请重新点击对应的等级按钮</span>
         </div>
 
         <!-- 资产表格清单 (加固最小宽度与防折行) -->
@@ -676,6 +707,54 @@
           </table>
         </div>
 
+        <!-- 对话记录管理：查看 / 接续 / 删除历史对话 -->
+        <div class="border border-gray-200 dark:border-dark-700 rounded-xl">
+          <div class="flex items-center justify-between px-3 py-2 bg-gray-100 dark:bg-dark-750 rounded-t-xl">
+            <span class="font-bold text-xs flex items-center">
+              <i data-lucide="messages-square" class="w-3.5 h-3.5 mr-1.5 text-sky-500"></i>对话记录（一份对话一个文件，完整保存）
+            </span>
+            <div class="flex items-center space-x-2">
+              <button @click="openChatLogDirHint" class="text-[11px] text-gray-500 dark:text-gray-400 hover:underline">查看存放目录</button>
+              <button @click="fetchChatLogs" class="text-[11px] text-brand-600 dark:text-brand-400 hover:underline flex items-center">
+                <i data-lucide="refresh-cw" class="w-3 h-3 mr-1" :class="{'animate-spin': isLoadingChatLogs}"></i>刷新
+              </button>
+            </div>
+          </div>
+          <div class="max-h-56 overflow-auto">
+            <table class="w-full text-left text-xs font-mono">
+              <thead class="bg-gray-50 dark:bg-dark-800 text-gray-600 dark:text-gray-300 sticky top-0">
+                <tr>
+                  <th class="p-2">记录文件</th>
+                  <th class="p-2">消息数</th>
+                  <th class="p-2">体积</th>
+                  <th class="p-2">最后修改</th>
+                  <th class="p-2">操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
+                <tr v-for="log in chatLogs" :key="log.name" class="hover:bg-gray-50 dark:hover:bg-dark-700/50">
+                  <td class="p-2 whitespace-nowrap">
+                    {{ log.name }}
+                    <span v-if="log.is_current" class="ml-1 px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px]">当前</span>
+                  </td>
+                  <td class="p-2 whitespace-nowrap">{{ log.messages }}</td>
+                  <td class="p-2 whitespace-nowrap">{{ (log.size_bytes / 1024).toFixed(1) }} KB</td>
+                  <td class="p-2 whitespace-nowrap text-gray-500">{{ new Date(log.modified_time * 1000).toLocaleString() }}</td>
+                  <td class="p-2 whitespace-nowrap">
+                    <button @click="switchChatLog(log)" :disabled="log.is_current"
+                            class="mr-2 text-brand-600 dark:text-brand-400 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed">接续</button>
+                    <button @click="deleteChatLog(log)" :disabled="log.is_current"
+                            class="text-rose-600 dark:text-rose-400 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed">删除</button>
+                  </td>
+                </tr>
+                <tr v-if="chatLogs.length === 0">
+                  <td colspan="5" class="p-4 text-center text-gray-400 font-sans">暂无对话记录（发出第一条消息后会自动生成）</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="flex justify-between items-center pt-2">
           <button @click="fetchAuditLogs" class="text-xs text-brand-600 dark:text-brand-400 hover:underline flex items-center">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5 mr-1"></i>刷新日志列表
@@ -811,6 +890,28 @@
           <div>
             <label class="block text-gray-500 dark:text-gray-400 mb-1 font-semibold">4. 黑名单拦截路径 (每行一个):</label>
             <textarea v-model="formScan.blacklist_str" rows="2" class="w-full bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono"></textarea>
+          </div>
+          <div class="border border-gray-200 dark:border-dark-700 bg-gray-50 dark:bg-dark-750 p-3 rounded-xl space-y-2.5">
+            <span class="font-semibold flex items-center">
+              <i data-lucide="messages-square" class="w-3.5 h-3.5 mr-1 text-sky-500"></i>对话记录
+            </span>
+            <div class="flex items-center space-x-3">
+              <div class="flex-1">
+                <label class="block text-gray-500 dark:text-gray-400 mb-1">上下文窗口（轮）：内存里保留最近多少轮，更早的仍在记录文件里</label>
+                <input v-model.number="formScan.chat_history_window_rounds" type="number" min="1" max="1000" class="w-28 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+              </div>
+              <div class="flex-1">
+                <label class="block text-gray-500 dark:text-gray-400 mb-1">记录文件告警阈值（MB）：超过只提醒一次，不删减、不压缩</label>
+                <input v-model.number="formScan.chat_log_size_warn_mb" type="number" min="1" step="10" class="w-28 bg-gray-100 dark:bg-dark-900 border border-gray-300 dark:border-dark-600 rounded-lg px-3 py-2 outline-none font-mono">
+              </div>
+            </div>
+            <div class="text-[11px] text-gray-500 dark:text-gray-400">
+              完整记录逐行保存在本地文件中，<span class="text-emerald-600 dark:text-emerald-400">永不自动删减</span>；
+              可在「📋 审计日志」面板里查看、接续或删除历史对话。
+            </div>
+            <div v-if="historyWindow.warning" class="text-[11px] text-amber-600 dark:text-amber-400">
+              ⚠️ {{ historyWindow.warning }}
+            </div>
           </div>
           <!-- 安全控制与密码中心 -->
           <div class="border border-gray-200 dark:border-dark-700 bg-gray-50 dark:bg-dark-750 p-3 rounded-xl space-y-2.5">
